@@ -44,7 +44,7 @@ def quat_multiply(_q1, _q2):
                  q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
                  q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0])
 
-def optimizeAlgebra(inexpr, prefix='X'):
+def optimizeAlgebra(inexpr, prefix='X',print_ops=False):
     def nameGen():
         n=0
         while True:
@@ -55,4 +55,14 @@ def optimizeAlgebra(inexpr, prefix='X'):
     subexpr, outexpr = cse(inexpr, nameGen(), optimizations='basic')
     if len(outexpr) == 1:
         outexpr = outexpr[0]
+    if print_ops:
+        savedops = 0
+        for i in range(len(subexpr)):
+            ops = subexpr[i][1].count_ops()
+            count = sum(map(lambda x: x[1].count(subexpr[i][0]), subexpr))
+            count += sum(map(lambda x: x.count(subexpr[i][0]), outexpr))
+            print "%s: %u ops, %u occurances, saves %u ops" % (subexpr[i][0], ops, count, count*ops-ops)
+            savedops += count*ops-ops
+        print "total saved ops: %u" % (savedops,)
+
     return outexpr, subexpr#[x[1] for x in subexpr]

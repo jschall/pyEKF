@@ -63,11 +63,11 @@ Q = G*distMatrix*G.T
 #Q,SQ = optimizeAlgebra(Q,'SQ')
 
 PP = F*P*F.T+Q
-PP,SPP = optimizeAlgebra(PP,'SPP')
+PP,SPP = optimizeAlgebra(PP,'SPP',True)
 
-print SPP, '\n\n'
-print PP
-print len(SPP)
+#print SPP, '\n\n'
+#print PP
+#print len(SPP)
 #for i in range(F.rows):
 #    print F.row(i)
 
