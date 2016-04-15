@@ -51,7 +51,7 @@ def optimizeAlgebra(inexpr, prefix='X'):
             yield Symbol('%s[%u]' % (prefix,n))
             n+=1
 
-    inexpr = Matrix(simplify(inexpr))
+    #inexpr = Matrix(simplify(inexpr))
     subexpr, outexpr = cse(inexpr, nameGen(), optimizations='basic')
     if len(outexpr) == 1:
         outexpr = outexpr[0]
