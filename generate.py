@@ -1,5 +1,9 @@
 from sympy import *
 from helpers import *
+from sympy.printing.ccode import *
+from sys import exit
+import math
+horizontalAccelBiases = False
 
 # Parameters
 estQuat = toVec(symbols('q0 q1 q2 q3'))
@@ -16,12 +20,16 @@ vel = toVec(symbols('vn ve vd'))
 pos = toVec(symbols('pn pe pd'))
 dAngBias = toVec(symbols('dax_b day_b daz_b'))
 dAngScale = toVec(symbols('dax_s day_s daz_s'))
-dVelBias = toVec(0.,0.,symbols('dvz_b'))
+if horizontalAccelBiases:
+    dVelBias = toVec(symbols('dvx_b dvy_b dvz_b'))
+else:
+    dVelBias = toVec(0,0,symbols('dvz_b'))
 magBody = toVec(symbols('magX magY magZ'))
 magNED = toVec(symbols('magN magE magD'))
 vwn, vwe = symbols('vwn vwe')
-stateVector = toVec(rotErr,vel,pos,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
+stateVector = toVec(rotErr,vel,pos,dAngBias,dAngScale,dVelBias if horizontalAccelBiases else dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
+print "nStates=%u" % (nStates,)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
@@ -29,7 +37,7 @@ P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
 # Prediction step
 errQuat = rot_vec_to_quat_approx(rotErr)
 truthQuat = quat_multiply(estQuat, errQuat)
-Tbn = quat_to_matrix(estQuat)
+Tbn = quat_to_matrix(truthQuat)
 dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias - dAngNoise
 deltaQuat = rot_vec_to_quat_approx(dAngTruth)
 truthQuatNew = quat_multiply(truthQuat, deltaQuat)
@@ -46,30 +54,67 @@ magNEDNew = magNED
 vwnNew = vwn
 vweNew = vwe
 
-stateVectorNew = toVec(rotErrNew,velNew,posNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2], magNEDNew, magBodyNew, vwnNew, vweNew)
+stateVectorNew = toVec(rotErrNew,velNew,posNew,dAngBiasNew,dAngScaleNew,dVelBiasNew if horizontalAccelBiases else dVelBiasNew[2], magNEDNew, magBodyNew, vwnNew, vweNew)
 
 F = stateVectorNew.jacobian(stateVector)
 F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
-#F,SF = optimizeAlgebra(F, 'SF')
-
 distVector = toVec(dAngNoise, dVelNoise)
 
 G = stateVectorNew.jacobian(distVector)
 G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
-#G,SG = optimizeAlgebra(G, 'SG')
 
 distMatrix = diag(*distVector.multiply_elementwise(distVector))
 Q = G*distMatrix*G.T
-#Q,SQ = optimizeAlgebra(Q,'SQ')
 
-PP = F*P*F.T+Q
-PP,SPP = optimizeAlgebra(PP,'SPP',True)
+# force symmetry
+P_covPred = P
+for r in range(P_covPred.rows):
+    for c in range(P_covPred.cols):
+        if c > r:
+            P_covPred[r,c] = P_covPred[c,r]
 
-#print SPP, '\n\n'
-#print PP
-#print len(SPP)
-#for i in range(F.rows):
-#    print F.row(i)
+PP = F*P_covPred*F.T+Q
+PP,SPP = optimizeAlgebra(PP,'SPP')
 
-#for x in SF:
-#    print x
+# code generation below
+
+PPc = ''
+PPc += 'float SPP[%u];\n\n' % (len(SPP),)
+
+for e in SPP:
+    PPc += ccode(e[1], assign_to=e[0])+'\n'
+
+N = PP.rows
+PPc += '\nfloat nextP[%u];\n\n' % ((N**2-N)/2+N,)
+
+PPidx = [0 for i in range((N**2-N)/2+N)]
+
+for k in range(len(PPidx)):
+    r = int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
+    c = int(k - N*r + r*(r-1)/2)
+    PPidx[k] = (r,c,k)
+
+for (r,c,k) in PPidx:
+    if r <= 15 and c <= 15:
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+
+PPc += '\n'
+
+for (r,c,k) in PPidx:
+    if (r > 15 or c > 15) and (r <= 21 and c <= 21):
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+
+PPc += '\n'
+
+for (r,c,k) in PPidx:
+    if r > 21 or c > 21:
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+
+PPc += '\n'
+
+# change pow(x,2) to sq(x)
+PPc = pow_to_sq(PPc)
+
+f = open('PP.c', 'w')
+f.write(PPc)
+f.close()
