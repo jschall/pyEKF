@@ -25,9 +25,9 @@ def quat_to_rot_vec_approx(_q):
 
 def quat_to_matrix(_q):
     q = toVec(_q)
-    return Matrix([[ 1.-2.*(q[2]**2+q[3]**2), 2.*(q[1]*q[2]-q[0]*q[3]), 2.*(q[1]*q[3]+q[0]*q[2])],
-                   [2.*(q[1]*q[2]+q[0]*q[3]),  1.-2.*(q[1]**2+q[3]**2), 2.*(q[2]*q[3]-q[0]*q[1])],
-                   [2.*(q[1]*q[3]-q[0]*q[2]), 2.*(q[2]*q[3]+q[0]*q[1]),  1.-2.*(q[1]**2+q[2]**2)]])
+    return Matrix([[ q[0]**2 + q[1]**2 - q[2]**2 - q[3]**2,             2.*(q[1]*q[2] - q[0]*q[3]),              2.*(q[1]*q[3] + q[0]*q[2])],
+                   [            2.*(q[1]*q[2] + q[0]*q[3]),  q[0]**2 - q[1]**2 + q[2]**2 - q[3]**2,              2.*(q[2]*q[3] - q[0]*q[1])],
+                   [              2.*(q[1]*q[3]-q[0]*q[2]),             2.*(q[2]*q[3] + q[0]*q[1]),  q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2]])
 
 def quat_inverse(_q):
     q = toVec(_q)
@@ -81,6 +81,9 @@ def optimizeAlgebra(inexpr, prefix='X',threshold=10):
         subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
         outexprs = outexprs.subs(*sub)
 
+    subexprs = map(lambda x: (x[0],simplify(x[1])), subexprs)
+    outexprs = simplify(outexprs)
+
     if debug:
         total_ops_after = sum(map(lambda x: x[1].count_ops(), subexprs))+sum(map(lambda x: x.count_ops(), outexprs))
 
@@ -96,3 +99,7 @@ def optimizeAlgebra(inexpr, prefix='X',threshold=10):
 def pow_to_sq(string):
     import re
     return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
+
+def row_column_to_linear_symmetric(N,r,c):
+    return (c-r)+24*r-r*(r-1)/2
+

@@ -12,10 +12,10 @@ dVelMeas = toVec(symbols('dvx dvy dvz'))
 dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
 gravityNED = toVec(0.,0.,symbols('gravity'))
-dt = symbols('dt')
+dt = Symbol('dt')
 
 # States
-rotErr = toVec(symbols('rex rey rez'))
+rotErr = toVec(symbols('rotErrX rotErrY rotErrZ'))
 vel = toVec(symbols('vn ve vd'))
 pos = toVec(symbols('pn pe pd'))
 dAngBias = toVec(symbols('dax_b day_b daz_b'))
@@ -33,6 +33,11 @@ print "nStates=%u" % (nStates,)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
+P_sym = P
+for r in range(P_sym.rows):
+    for c in range(P_sym.cols):
+        if r > c:
+            P_sym[c,r] = P_sym[r,c]
 
 # Prediction step
 errQuat = rot_vec_to_quat_approx(rotErr)
@@ -66,15 +71,45 @@ G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 distMatrix = diag(*distVector.multiply_elementwise(distVector))
 Q = G*distMatrix*G.T
 
-# force symmetry
-P_covPred = P
-for r in range(P_covPred.rows):
-    for c in range(P_covPred.cols):
-        if c > r:
-            P_covPred[r,c] = P_covPred[c,r]
+# NOTE: PP has been analytically verified to be equal to PP in the priseoborough/InertialNav matlab code
+PP = F*P*F.T+Q
 
-PP = F*P_covPred*F.T+Q
+for r in range(PP.rows):
+    for c in range(PP.cols):
+        PP = PP.subs(P[r,c], P_sym[r,c])
+
+for r in range(PP.rows):
+    for c in range(PP.cols):
+        if r > c:
+            PP[r,c] = 0.
+
 PP,SPP = optimizeAlgebra(PP,'SPP')
+
+# TEST: reverse the above line
+    #while len(SPP) > 0:
+        #sub = SPP.pop()
+        #SPP = map(lambda x: (x[0],x[1].subs(*sub)), SPP)
+        #PP = PP.subs(*sub)
+
+# TEST: analytically compare to matlab results
+    #import matlabPP
+    #MPP = sympify(matlabPP.PP)
+
+    #P_matlab = Matrix(nStates,nStates,symbols('P_l_1:%u_c_1:%u_r_' % (nStates+1,nStates+1)))
+    #for r in range(PP.rows):
+        #for c in range(PP.cols):
+            #MPP = map(lambda x: x.subs(P_matlab[r,c], P_sym[r,c]), MPP)
+
+    #for r in range(PP.rows):
+        #for c in range(PP.cols):
+            #i = r*nStates+c
+            #if r > c:
+                #MPP[i] = 0
+
+    #for r in range(PP.rows):
+        #for c in range(PP.cols):
+            #i = r*nStates+c
+            #print r,c,simplify(MPP[i]-PP[r,c])
 
 # code generation below
 
@@ -91,7 +126,7 @@ PPidx = [0 for i in range((N**2-N)/2+N)]
 
 for k in range(len(PPidx)):
     r = int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
-    c = int(k - N*r + r*(r-1)/2)
+    c = int(k - N*r + r*(r-1)/2 + r)
     PPidx[k] = (r,c,k)
 
 for (r,c,k) in PPidx:
