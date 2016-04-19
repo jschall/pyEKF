@@ -74,10 +74,14 @@ Q = G*distMatrix*G.T
 # NOTE: PP has been analytically verified to be equal to PP in the priseoborough/InertialNav matlab code
 PP = F*P*F.T+Q
 
+# Optimizations
+
+# assume that the P matrix is symmetrical
 for r in range(PP.rows):
     for c in range(PP.cols):
         PP = PP.subs(P[r,c], P_sym[r,c])
 
+# zero the lower off-diagonals
 for r in range(PP.rows):
     for c in range(PP.cols):
         if r > c:
@@ -85,33 +89,7 @@ for r in range(PP.rows):
 
 PP,SPP = optimizeAlgebra(PP,'SPP')
 
-# TEST: reverse the above line
-    #while len(SPP) > 0:
-        #sub = SPP.pop()
-        #SPP = map(lambda x: (x[0],x[1].subs(*sub)), SPP)
-        #PP = PP.subs(*sub)
-
-# TEST: analytically compare to matlab results
-    #import matlabPP
-    #MPP = sympify(matlabPP.PP)
-
-    #P_matlab = Matrix(nStates,nStates,symbols('P_l_1:%u_c_1:%u_r_' % (nStates+1,nStates+1)))
-    #for r in range(PP.rows):
-        #for c in range(PP.cols):
-            #MPP = map(lambda x: x.subs(P_matlab[r,c], P_sym[r,c]), MPP)
-
-    #for r in range(PP.rows):
-        #for c in range(PP.cols):
-            #i = r*nStates+c
-            #if r > c:
-                #MPP[i] = 0
-
-    #for r in range(PP.rows):
-        #for c in range(PP.cols):
-            #i = r*nStates+c
-            #print r,c,simplify(MPP[i]-PP[r,c])
-
-# code generation below
+# Code generation
 
 PPc = ''
 PPc += 'float SPP[%u];\n\n' % (len(SPP),)
@@ -131,19 +109,19 @@ for k in range(len(PPidx)):
 
 for (r,c,k) in PPidx:
     if r <= 15 and c <= 15:
-        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'\n'
 
 PPc += '\n'
 
 for (r,c,k) in PPidx:
     if (r > 15 or c > 15) and (r <= 21 and c <= 21):
-        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'\n'
 
 PPc += '\n'
 
 for (r,c,k) in PPidx:
     if r > 21 or c > 21:
-        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'// [%u,%u]\n'%(r,c)
+        PPc += ccode(PP[r,c], assign_to='nextP[%u]' % (k,))+'\n'
 
 PPc += '\n'
 
