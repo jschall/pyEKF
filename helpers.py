@@ -56,21 +56,6 @@ def optimizeAlgebra(inexpr, prefix='X',threshold=10):
             subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
             outexprs = outexprs.subs(*sub)
 
-    #while True:
-        ## slow method: find the worst subexpression and remove it, repeatedly
-        #ops_saved = []
-        #for i in range(len(subexprs)):
-            #ops_saved.append(
-                #(sum(map(lambda x: x[1].count(subexprs[i][0]), subexprs))+
-                #(sum(map(lambda x: x.count(subexprs[i][0]), outexprs)))-1)*subexprs[i][1].count_ops())
-        #if min(ops_saved) < threshold:
-            #i = ops_saved.index(min(ops_saved))
-            #sub = subexprs.pop(i)
-            #subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
-            #outexprs = outexprs.subs(*sub)
-        #else:
-            #break
-
     for i in range(len(subexprs)):
         newSym = Symbol('%s[%u]' % (prefix,i))
         sub = (subexprs[i][0],newSym)
@@ -82,3 +67,25 @@ def optimizeAlgebra(inexpr, prefix='X',threshold=10):
     outexprs = simplify(outexprs)
 
     return outexprs, subexprs
+
+def pow_to_sq(string):
+    import re
+    return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
+
+def loadExprsFromJSON(fname, keys):
+    with open(fname, 'r') as f:
+        import json
+        imported = json.load(f)
+        ret = []
+        for k in keys:
+            ret.append(sympify(imported[k]))
+        return tuple(ret)
+
+def saveExprsToJSON(fname, expr_dict):
+    with open(fname, 'w') as f:
+        import json
+        save_dict = {}
+        for k,v in expr_dict.iteritems():
+            save_dict[k] = srepr(v)
+
+        json.dump(save_dict, f)

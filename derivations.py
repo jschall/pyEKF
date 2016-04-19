@@ -87,6 +87,4 @@ def deriveCovariancePrediction(jsonfile):
 
     OPP,SPP = optimizeAlgebra(OPP,'SPP')
 
-    with open(jsonfile, 'w') as f:
-        import json
-        json.dump({'PP':srepr(PP), 'OPP':srepr(OPP), 'SPP':srepr(SPP)}, f)
+    saveExprsToJSON(jsonfile, {'PP':PP, 'OPP':OPP, 'SPP':SPP})

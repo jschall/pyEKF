@@ -1,22 +1,10 @@
 from sympy import *
 from sympy.printing.ccode import *
+from helpers import *
 import math
 
-def pow_to_sq(string):
-    import re
-    return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
-
-def loadFromJSON(fname, keys):
-    with open(fname, 'r') as f:
-        import json
-        imported = json.load(f)
-        ret = []
-        for k in keys:
-            ret.append(sympify(imported[k]))
-        return tuple(ret)
-
 def generateCovariancePrediction(jsonfile, cfile):
-    OPP, SPP = loadFromJSON(jsonfile, ['OPP', 'SPP'])
+    OPP, SPP = loadExprsFromJSON(jsonfile, ['OPP', 'SPP'])
 
     N = OPP.rows
     PPidx = []
