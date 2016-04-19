@@ -82,11 +82,3 @@ def optimizeAlgebra(inexpr, prefix='X',threshold=10):
     outexprs = simplify(outexprs)
 
     return outexprs, subexprs
-
-def pow_to_sq(string):
-    import re
-    return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
-
-def row_column_to_linear_symmetric(N,r,c):
-    return (c-r)+24*r-r*(r-1)/2
-
