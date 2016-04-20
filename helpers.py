@@ -44,29 +44,30 @@ def quat_multiply(_q1, _q2):
                  q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
                  q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0])
 
-def optimizeAlgebra(inexpr, prefix='X',threshold=10):
-    subexprs, outexprs = cse(inexpr)
-    if len(outexprs) == 1:
-        outexprs = outexprs[0]
+def count_subexpression(subexpr, expr):
+    if hasattr(expr, "__getitem__"):
+        return sum(map(lambda x: count_subexpression(subexpr, x), expr))
+    else:
+        return expr.count(subexpr)
+
+def extractSubexpressions(inexprs, prefix='X',threshold=10):
+    subexprs, outexprs = cse(inexprs)
 
     for i in reversed(range(len(subexprs))):
-        ops_saved = (sum(map(lambda x: x[1].count(subexprs[i][0]), subexprs))+(sum(map(lambda x: x.count(subexprs[i][0]), outexprs)))-1)*subexprs[i][1].count_ops()
+        ops_saved = (count_subexpression(subexprs[i][0], [[x[1] for x in subexprs], outexprs])-1)*subexprs[i][1].count_ops()
         if ops_saved < threshold:
             sub = subexprs.pop(i)
             subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
-            outexprs = outexprs.subs(*sub)
+            outexprs = map(lambda x: x.subs(*sub), outexprs)
 
     for i in range(len(subexprs)):
         newSym = Symbol('%s[%u]' % (prefix,i))
         sub = (subexprs[i][0],newSym)
         subexprs[i] = (newSym,subexprs[i][1])
         subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
-        outexprs = outexprs.subs(*sub)
+        outexprs = map(lambda x: x.subs(*sub), outexprs)
 
-    subexprs = map(lambda x: (x[0],simplify(x[1])), subexprs)
-    outexprs = simplify(outexprs)
-
-    return outexprs, subexprs
+    return tuple(outexprs+[subexprs])
 
 def pow_to_sq(string):
     import re
@@ -83,6 +84,7 @@ def loadExprsFromJSON(fname, keys):
 
 def saveExprsToJSON(fname, expr_dict):
     with open(fname, 'w') as f:
+        f.truncate()
         import json
         save_dict = {}
         for k,v in expr_dict.iteritems():

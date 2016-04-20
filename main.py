@@ -13,13 +13,24 @@ resultsdir = 'results'
 if not os.path.exists(resultsdir):
     os.makedirs(resultsdir)
 
-jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
-cfile = os.path.join(resultsdir, 'covariancePrediction.c')
+
+
 
 if args.derive:
+    jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
     deriveCovariancePrediction(jsonfile)
     print('Covariance predicton derivation saved to %s' % (jsonfile,))
 
+    jsonfile = os.path.join(resultsdir, 'airspeedFusion.json')
+    deriveAirspeedFusion(jsonfile)
+    print('Airspeed fusion derivation saved to %s' % (jsonfile,))
+
+    jsonfile = os.path.join(resultsdir, 'betaFusion.json')
+    deriveBetaFusion(jsonfile)
+    print('Beta fusion derivation saved to %s' % (jsonfile,))
+
 if args.codegen:
+    jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
+    cfile = os.path.join(resultsdir, 'covariancePrediction.c')
     generateCovariancePrediction(jsonfile, cfile)
     print('Covariance predicton c code saved to %s' % (cfile,))

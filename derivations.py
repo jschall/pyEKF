@@ -12,42 +12,46 @@ dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
 gravityNED = toVec(0.,0.,symbols('gravity'))
 dt = Symbol('dt')
+R_TAS, R_BETA, R_MAG = symbols('R_TAS R_BETA R_MAG')
 
 # States
 rotErr = toVec(symbols('rotErrX rotErrY rotErrZ'))
-vel = toVec(symbols('vn ve vd'))
-pos = toVec(symbols('pn pe pd'))
+vn,ve,vd = symbols('vn ve vd')
+velNED = toVec(vn,ve,vd)
+posNED = toVec(symbols('pn pe pd'))
 dAngBias = toVec(symbols('dax_b day_b daz_b'))
 dAngScale = toVec(symbols('dax_s day_s daz_s'))
 dVelBias = toVec(0,0,symbols('dvz_b'))
 magBody = toVec(symbols('magX magY magZ'))
 magNED = toVec(symbols('magN magE magD'))
 vwn, vwe = symbols('vwn vwe')
-stateVector = toVec(rotErr,vel,pos,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
+windNED = toVec(vwn,vwe,0.)
+stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
-P_sym = P
-for r in range(P_sym.rows):
-    for c in range(P_sym.cols):
+P_symmetric = P
+for r in range(P_symmetric.rows):
+    for c in range(P_symmetric.cols):
         if r > c:
-            P_sym[c,r] = P_sym[r,c]
+            P_symmetric[c,r] = P_symmetric[r,c]
 
+# Common computations
+errQuat = rot_vec_to_quat_approx(rotErr)
+truthQuat = quat_multiply(estQuat, errQuat)
+Tbn = quat_to_matrix(truthQuat)
 
 def deriveCovariancePrediction(jsonfile):
     # Prediction step
-    errQuat = rot_vec_to_quat_approx(rotErr)
-    truthQuat = quat_multiply(estQuat, errQuat)
-    Tbn = quat_to_matrix(truthQuat)
     dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias - dAngNoise
     deltaQuat = rot_vec_to_quat_approx(dAngTruth)
     truthQuatNew = quat_multiply(truthQuat, deltaQuat)
     errQuatNew = quat_multiply(quat_inverse(estQuat), truthQuatNew)
     rotErrNew = quat_to_rot_vec_approx(errQuatNew)
     dVelTruth = dVelMeas - dVelBias - dVelNoise
-    velNew = vel+gravityNED*dt + Tbn*dVelTruth
-    posNew = pos+vel*dt
+    velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
+    posNEDNew = posNED+velNED*dt
     dAngBiasNew = dAngBias
     dAngScaleNew = dAngScale
     dVelBiasNew = dVelBias
@@ -56,7 +60,7 @@ def deriveCovariancePrediction(jsonfile):
     vwnNew = vwn
     vweNew = vwe
 
-    stateVectorNew = toVec(rotErrNew,velNew,posNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+    stateVectorNew = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
 
     F = stateVectorNew.jacobian(stateVector)
     F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
@@ -72,19 +76,75 @@ def deriveCovariancePrediction(jsonfile):
     PP = F*P*F.T+Q
 
     # Optimizations
-    OPP = PP
+    PP_O = PP
 
     # assume that the P matrix is symmetrical
-    for r in range(OPP.rows):
-        for c in range(OPP.cols):
-            OPP = OPP.subs(P[r,c], P_sym[r,c])
+    for i in range(len(P)):
+        PP_O = PP_O.subs(P[i], P_symmetric[i])
 
     # zero the lower off-diagonals
-    for r in range(OPP.rows):
-        for c in range(OPP.cols):
+    for r in range(PP_O.rows):
+        for c in range(PP_O.cols):
             if r > c:
-                OPP[r,c] = 0.
+                PP_O[r,c] = 0.
 
-    OPP,SPP = optimizeAlgebra(OPP,'SPP')
+    PP_O,PP_S = extractSubexpressions(PP_O,'PP_S')
 
-    saveExprsToJSON(jsonfile, {'PP':PP, 'OPP':OPP, 'SPP':SPP})
+    saveExprsToJSON(jsonfile, {'PP':PP, 'PP_O':PP_O, 'PP_S':PP_S})
+
+def deriveAirspeedFusion(jsonfile):
+    VtasPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
+
+    H = VtasPred.jacobian(stateVector)
+
+    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
+
+    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
+    H_O, H_S = extractSubexpressions(H,'H_S')
+
+    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_TAS]]))[0]
+    K_O = K
+
+    for i in range(len(H_sym)):
+        K = K.subs(H_sym[i], H[i])
+
+    for i in range(len(H_sym)):
+        K_O = K_O.subs(H_sym[i], H_O[i])
+
+    for i in range(len(P)):
+        K_O = K_O.subs(P[i], P_symmetric[i])
+
+    K_O, K_S = extractSubexpressions(K_O,'K_S')
+
+    # TODO should specify covariance update here instead of hand-coding
+
+    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
+
+def deriveBetaFusion(jsonfile):
+    Vbw = Tbn.T*(velNED-windNED)
+    BetaPred = Matrix([[Vbw[1]/Vbw[0]]])
+
+    H = BetaPred.jacobian(stateVector)
+
+    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
+
+    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
+    H_O, H_S = extractSubexpressions(H,'H_S')
+
+    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_BETA]]))[0]
+    K_O = K
+
+    for i in range(len(H_sym)):
+        K = K.subs(H_sym[i], H[i])
+
+    for i in range(len(H_sym)):
+        K_O = K_O.subs(H_sym[i], H_O[i])
+
+    for i in range(len(P)):
+        K_O = K_O.subs(P[i], P_symmetric[i])
+
+    K_O, K_S = extractSubexpressions(K_O,'K_S')
+
+    # TODO should specify covariance update here instead of hand-coding
+
+    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
