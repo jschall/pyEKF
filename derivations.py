@@ -79,8 +79,7 @@ def deriveCovariancePrediction(jsonfile):
     PP_O = PP
 
     # assume that the P matrix is symmetrical
-    for i in range(len(P)):
-        PP_O = PP_O.subs(P[i], P_symmetric[i])
+    PP_O = PP_O.subs(zip(P, P_symmetric))
 
     # zero the lower off-diagonals
     for r in range(PP_O.rows):
@@ -103,16 +102,9 @@ def deriveAirspeedFusion(jsonfile):
     H_O, H_S = extractSubexpressions(H,'H_S')
 
     K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_TAS]]))[0]
-    K_O = K
 
-    for i in range(len(H_sym)):
-        K = K.subs(H_sym[i], H[i])
-
-    for i in range(len(H_sym)):
-        K_O = K_O.subs(H_sym[i], H_O[i])
-
-    for i in range(len(P)):
-        K_O = K_O.subs(P[i], P_symmetric[i])
+    K_O = K.subs(zip(H_sym, H_O)+zip(P,P_symmetric))
+    K = K.subs(zip(H_sym,H))
 
     K_O, K_S = extractSubexpressions(K_O,'K_S')
 
@@ -132,16 +124,8 @@ def deriveBetaFusion(jsonfile):
     H_O, H_S = extractSubexpressions(H,'H_S')
 
     K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_BETA]]))[0]
-    K_O = K
-
-    for i in range(len(H_sym)):
-        K = K.subs(H_sym[i], H[i])
-
-    for i in range(len(H_sym)):
-        K_O = K_O.subs(H_sym[i], H_O[i])
-
-    for i in range(len(P)):
-        K_O = K_O.subs(P[i], P_symmetric[i])
+    K_O = K.subs(zip(H_sym, H_O)+zip(P,P_symmetric))
+    K = K.subs(zip(H_sym,H))
 
     K_O, K_S = extractSubexpressions(K_O,'K_S')
 
