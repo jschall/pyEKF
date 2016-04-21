@@ -72,7 +72,6 @@ def deriveCovariancePrediction(jsonfile):
     distMatrix = diag(*distVector.multiply_elementwise(distVector))
     Q = G*distMatrix*G.T
 
-    # NOTE: PP has been analytically verified to be equal to PP in the priseoborough/InertialNav matlab code
     PP = F*P*F.T+Q
 
     # Optimizations
@@ -108,15 +107,13 @@ def deriveAirspeedFusion(jsonfile):
 
     K_O, K_S = extractSubexpressions(K_O,'K_S')
 
-    # TODO should specify covariance update here instead of hand-coding
-
     saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
 
 def deriveBetaFusion(jsonfile):
     Vbw = Tbn.T*(velNED-windNED)
-    BetaPred = Matrix([[Vbw[1]/Vbw[0]]])
+    betaPred = Matrix([[Vbw[1]/Vbw[0]]])
 
-    H = BetaPred.jacobian(stateVector)
+    H = betaPred.jacobian(stateVector)
 
     H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
 
@@ -129,6 +126,27 @@ def deriveBetaFusion(jsonfile):
 
     K_O, K_S = extractSubexpressions(K_O,'K_S')
 
-    # TODO should specify covariance update here instead of hand-coding
-
     saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
+
+def deriveMagFusion(jsonfile):
+    magPred = Tbn.T*magNED+magBody
+    H = magPred.jacobian(stateVector)
+
+    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
+
+    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
+
+    H_O, H_S = extractSubexpressions(H,'H_S')
+
+    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_MAG]]))[0]
+
+    KX = K.subs(zip(H_sym,H.row(0)))
+    KY = K.subs(zip(H_sym,H.row(1)))
+    KZ = K.subs(zip(H_sym,H.row(2)))
+    KX_O = K.subs(zip(H_sym,H_O.row(0))+zip(P,P_symmetric))
+    KY_O = K.subs(zip(H_sym,H_O.row(1))+zip(P,P_symmetric))
+    KZ_O = K.subs(zip(H_sym,H_O.row(2))+zip(P,P_symmetric))
+
+    KX_O, KY_O, KZ_O, K_S = extractSubexpressions([KX_O,KY_O,KZ_O],'K_S')
+
+    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'KX_O':KX, 'KY_O':KY, 'KZ_O':KZ, 'K_S':K_S})

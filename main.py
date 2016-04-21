@@ -8,6 +8,7 @@ parser.add_argument('--derive-all', dest='derive_all', action='store_true')
 parser.add_argument('--derive-prediction', dest='derive_prediction', action='store_true')
 parser.add_argument('--derive-airspeed', dest='derive_airspeed', action='store_true')
 parser.add_argument('--derive-beta', dest='derive_beta', action='store_true')
+parser.add_argument('--derive-mag', dest='derive_mag', action='store_true')
 parser.add_argument('--codegen', dest='codegen', action='store_true')
 args = parser.parse_args()
 
@@ -31,6 +32,11 @@ if args.derive_all or args.derive_beta:
     jsonfile = os.path.join(resultsdir, 'betaFusion.json')
     deriveBetaFusion(jsonfile)
     print('Beta fusion derivation saved to %s' % (jsonfile,))
+
+if args.derive_all or args.derive_mag:
+    jsonfile = os.path.join(resultsdir, 'magFusion.json')
+    deriveMagFusion(jsonfile)
+    print('Mag fusion derivation saved to %s' % (jsonfile,))
 
 if args.codegen:
     jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
