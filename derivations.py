@@ -44,12 +44,12 @@ Tbn = quat_to_matrix(truthQuat)
 
 def deriveCovariancePrediction(jsonfile):
     # Prediction step
-    dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias - dAngNoise
+    dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias
     deltaQuat = rot_vec_to_quat_approx(dAngTruth)
     truthQuatNew = quat_multiply(truthQuat, deltaQuat)
     errQuatNew = quat_multiply(quat_inverse(estQuat), truthQuatNew)
     rotErrNew = quat_to_rot_vec_approx(errQuatNew)
-    dVelTruth = dVelMeas - dVelBias - dVelNoise
+    dVelTruth = dVelMeas - dVelBias
     velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
     posNEDNew = posNED+velNED*dt
     dAngBiasNew = dAngBias
@@ -64,15 +64,15 @@ def deriveCovariancePrediction(jsonfile):
 
     F = stateVectorNew.jacobian(stateVector)
     F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
-    distVector = toVec(dAngNoise, dVelNoise)
 
-    G = stateVectorNew.jacobian(distVector)
+    G = -stateVectorNew.jacobian(toVec(dAngMeas,dVelMeas))
     G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
+    distVector = toVec(dAngNoise, dVelNoise)
     distMatrix = diag(*distVector.multiply_elementwise(distVector))
     Q = G*distMatrix*G.T
 
-    PP = F*P*F.T+Q
+    PP = F*P*F.T + Q
 
     # Optimizations
     PP_O = PP
