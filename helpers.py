@@ -7,7 +7,7 @@ def toVec(*args):
 
 def rot_vec_to_quat(_v):
     v = toVec(_v)
-    theta = v.norm()
+    theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
     axis = v/theta
     return toVec(cos(theta/2.), sin(theta/2.) * axis[0], sin(theta/2.) * axis[1], sin(theta/2.) * axis[2])
 
@@ -15,13 +15,27 @@ def rot_vec_to_quat_approx(_v):
     v = toVec(_v)
     return toVec(1.,v*0.5)
 
+def rot_vec_to_quat_approx2(_v):
+    v = toVec(_v)
+    return toVec(1.-0.5*sqrt(v[0]**2+v[1]**2+v[2]**2),v*0.5)
+
 def quat_to_rot_vec(_q):
     q = toVec(_q)
-    return toVec(q[1],q[2],q[3])*q[0]/toVec(q[1],q[2],q[3]).norm()
+
+    theta = 2.*acos(q[0])
+    axis = toVec(q[1],q[2],q[3])/sqrt(q[1]**2+q[2]**2+q[3]**2)
+
+    return theta*axis
 
 def quat_to_rot_vec_approx(_q):
     q = toVec(_q)
     return 2.*toVec(q[1],q[2],q[3])
+
+def quat_to_rot_vec_approx2(_q):
+    q = toVec(_q)
+
+    return 2.*toVec(q[1],q[2],q[3])/q[0]
+
 
 def quat_to_matrix(_q):
     q = toVec(_q)
