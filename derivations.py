@@ -47,7 +47,8 @@ def deriveCovariancePrediction(jsonfile):
     dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias
     deltaQuat = rot_vec_to_quat_approx(dAngTruth)
     truthQuatNew = quat_multiply(truthQuat, deltaQuat)
-    errQuatNew = quat_multiply(quat_inverse(estQuat), truthQuatNew)
+    estQuatNew = quat_multiply(estQuat, deltaQuat)
+    errQuatNew = quat_multiply(quat_inverse(estQuatNew), truthQuatNew)
     rotErrNew = quat_to_rot_vec_approx(errQuatNew)
     dVelTruth = dVelMeas - dVelBias
     velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
