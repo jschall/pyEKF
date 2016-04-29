@@ -45,12 +45,18 @@ if args.derive_all or args.derive_mag:
     print('Mag fusion derivation saved to %s' % (jsonfile,))
 
 if args.codegen:
-    jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
-    cfile = os.path.join(resultsdir, 'covariancePrediction.c')
-    generateCovariance(jsonfile, cfile)
-    print('Covariance predicton c code saved to %s' % (cfile,))
+    try:
+        jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
+        cfile = os.path.join(resultsdir, 'covariancePrediction.c')
+        generateCovariance(jsonfile, cfile)
+        print('Covariance predicton c code saved to %s' % (cfile,))
+    except:
+        pass
 
-    jsonfile = os.path.join(resultsdir, 'covarianceRotation.json')
-    cfile = os.path.join(resultsdir, 'covarianceRotation.c')
-    generateCovariance(jsonfile, cfile)
-    print('Covariance rotation c code saved to %s' % (cfile,))
+    try:
+        jsonfile = os.path.join(resultsdir, 'covarianceRotation.json')
+        cfile = os.path.join(resultsdir, 'covarianceRotation.c')
+        generateCovariance(jsonfile, cfile)
+        print('Covariance rotation c code saved to %s' % (cfile,))
+    except:
+        pass

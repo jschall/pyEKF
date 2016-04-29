@@ -6,13 +6,15 @@ import math
 
 # Parameters
 estQuat = toVec(symbols('q0 q1 q2 q3'))
-dAngMeas = toVec(symbols('dax day daz'))
-dVelMeas = toVec(symbols('dvx dvy dvz'))
 dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
 gravityNED = toVec(0.,0.,symbols('gravity'))
 dt = Symbol('dt')
 R_TAS, R_BETA, R_MAG = symbols('R_TAS R_BETA R_MAG')
+
+# Inputs
+dAngMeas = toVec(symbols('dax day daz'))
+dVelMeas = toVec(symbols('dvx dvy dvz'))
 
 # States
 rotErr = toVec(symbols('rotErrX rotErrY rotErrZ'))
@@ -60,18 +62,30 @@ def deriveCovariancePrediction(jsonfile):
     vwnNew = vwn
     vweNew = vwe
 
-    stateVectorNew = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+    # f: state-transtition model
+    f = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
 
-    F = stateVectorNew.jacobian(stateVector)
+    # F: linearized state-transition model
+    F = f.jacobian(stateVector)
     F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
-    G = stateVectorNew.jacobian(toVec(dAngMeas,dVelMeas))
+    # u: control input vector
+    u = toVec(dAngMeas,dVelMeas)
+
+    # G: control-influence matrix, AKA "B" in literature
+    G = f.jacobian(u)
     G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
+    # additive noise on u
     distVector = toVec(dAngNoise, dVelNoise)
+
+    # covariance of additive noise on u
     distMatrix = diag(*distVector.multiply_elementwise(distVector))
+
+    # covariance of additive noise on x
     Q = G*distMatrix*G.T
 
+    # PP: predicted covariance matrix
     PP = F*P*F.T + Q
 
     # Optimizations
