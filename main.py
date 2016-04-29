@@ -6,6 +6,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--derive-all', dest='derive_all', action='store_true')
 parser.add_argument('--derive-prediction', dest='derive_prediction', action='store_true')
+parser.add_argument('--derive-rotation', dest='derive_rotation', action='store_true')
 parser.add_argument('--derive-airspeed', dest='derive_airspeed', action='store_true')
 parser.add_argument('--derive-beta', dest='derive_beta', action='store_true')
 parser.add_argument('--derive-mag', dest='derive_mag', action='store_true')
@@ -22,6 +23,11 @@ if args.derive_all or args.derive_prediction:
     jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
     deriveCovariancePrediction(jsonfile)
     print('Covariance predicton derivation saved to %s' % (jsonfile,))
+
+if args.derive_all or args.derive_rotation:
+    jsonfile = os.path.join(resultsdir, 'covarianceRotation.json')
+    deriveCovarianceRotation(jsonfile)
+    print('Covariance rotation derivation saved to %s' % (jsonfile,))
 
 if args.derive_all or args.derive_airspeed:
     jsonfile = os.path.join(resultsdir, 'airspeedFusion.json')
@@ -41,5 +47,10 @@ if args.derive_all or args.derive_mag:
 if args.codegen:
     jsonfile = os.path.join(resultsdir, 'covariancePrediction.json')
     cfile = os.path.join(resultsdir, 'covariancePrediction.c')
-    generateCovariancePrediction(jsonfile, cfile)
+    generateCovariance(jsonfile, cfile)
     print('Covariance predicton c code saved to %s' % (cfile,))
+
+    jsonfile = os.path.join(resultsdir, 'covarianceRotation.json')
+    cfile = os.path.join(resultsdir, 'covarianceRotation.c')
+    generateCovariance(jsonfile, cfile)
+    print('Covariance rotation c code saved to %s' % (cfile,))

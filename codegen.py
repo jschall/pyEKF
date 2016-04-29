@@ -3,7 +3,7 @@ from sympy.printing.ccode import *
 from helpers import *
 import math
 
-def generateCovariancePrediction(jsonfile, cfile):
+def generateCovariance(jsonfile, cfile):
     PP_O, PP_S = loadExprsFromJSON(jsonfile, ['PP_O', 'PP_S'])
 
     N = PP_O.rows
@@ -37,8 +37,6 @@ def generateCovariancePrediction(jsonfile, cfile):
             PPc += '            '+ccode(PP_O[r,c], assign_to='nextP[%u]' % (k,))+'\n'
 
     PPc += '        }\n    }\n'
-
-    PPc = pow_to_sq(PPc)
 
     f = open(cfile, 'w')
     f.write(PPc)

@@ -5,6 +5,14 @@ def toVec(*args):
     ret = Matrix(map(lambda x: Matrix([x]), args)).vec()
     return ret
 
+def skew(_v):
+    v = toVec(_v)
+    return Matrix([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0]
+    ])
+
 def rot_vec_to_quat(_v):
     v = toVec(_v)
     theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
@@ -36,12 +44,15 @@ def quat_to_rot_vec_approx2(_q):
 
     return 2.*toVec(q[1],q[2],q[3])/q[0]
 
-
 def quat_to_matrix(_q):
     q = toVec(_q)
-    return Matrix([[ q[0]**2 + q[1]**2 - q[2]**2 - q[3]**2,             2.*(q[1]*q[2] - q[0]*q[3]),              2.*(q[1]*q[3] + q[0]*q[2])],
-                   [            2.*(q[1]*q[2] + q[0]*q[3]),  q[0]**2 - q[1]**2 + q[2]**2 - q[3]**2,              2.*(q[2]*q[3] - q[0]*q[1])],
-                   [              2.*(q[1]*q[3]-q[0]*q[2]),             2.*(q[2]*q[3] + q[0]*q[1]),  q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2]])
+    return (q[0]**2-(q[1:,0].T*q[1:,0])[0])*eye(3) + 2.*(q[1:,0]*q[1:,0].T) + 2.*q[0]*skew(q[1:,0])
+
+def rot_vec_to_matrix(_v):
+    v = toVec(_v)
+    theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
+    axis = v/theta
+    return eye(3)*cos(theta)+(1-cos(theta))*axis*axis.T+skew(axis)*sin(theta)
 
 def quat_inverse(_q):
     q = toVec(_q)

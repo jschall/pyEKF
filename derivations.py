@@ -65,7 +65,7 @@ def deriveCovariancePrediction(jsonfile):
     F = stateVectorNew.jacobian(stateVector)
     F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
-    G = -stateVectorNew.jacobian(toVec(dAngMeas,dVelMeas))
+    G = stateVectorNew.jacobian(toVec(dAngMeas,dVelMeas))
     G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
     distVector = toVec(dAngNoise, dVelNoise)
@@ -78,6 +78,39 @@ def deriveCovariancePrediction(jsonfile):
     PP_O = PP
 
     # assume that the P matrix is symmetrical
+    PP_O = PP_O.subs(zip(P, P_symmetric))
+
+    # zero the lower off-diagonals
+    for r in range(PP_O.rows):
+        for c in range(PP_O.cols):
+            if r > c:
+                PP_O[r,c] = 0.
+
+    PP_O,PP_S = extractSubexpressions(PP_O,'PP_S')
+
+    saveExprsToJSON(jsonfile, {'PP':PP, 'PP_O':PP_O, 'PP_S':PP_S})
+
+def deriveCovarianceRotation(jsonfile):
+    Tprevnew = rot_vec_to_matrix(rotErr).T
+    rotErrNew = Tprevnew*rotErr
+    velNEDNew = velNED
+    posNEDNew = posNED
+    dAngBiasNew = dAngBias#Tprevnew*dAngBias
+    dAngScaleNew = dAngScale#Tprevnew*dAngScale
+    dVelBiasNew = dVelBias#Tprevnew*dVelBias
+    magNEDNew = magNED
+    magBodyNew = magBody#Tprevnew*magBody
+    vwnNew = vwn
+    vweNew = vwe
+
+    stateVectorNew = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+
+    psi = stateVectorNew.jacobian(stateVector)
+
+    PP = psi*P*psi.T
+
+    # Optimizations
+    PP_O = PP
     PP_O = PP_O.subs(zip(P, P_symmetric))
 
     # zero the lower off-diagonals
