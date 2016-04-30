@@ -69,6 +69,10 @@ def quat_multiply(_q1, _q2):
                  q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
                  q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0])
 
+def quat_normalize(_q):
+    q = toVec(_q)
+    return q/sqrt(q[0]**2+q[1]**2+q[2]**2+q[3]**2)
+
 def count_subexpression(subexpr, expr):
     if hasattr(expr, "__getitem__"):
         return sum(map(lambda x: count_subexpression(subexpr, x), expr))

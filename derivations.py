@@ -1,6 +1,5 @@
 from sympy import *
 from helpers import *
-from sympy.printing.ccode import *
 from sys import exit
 import math
 
