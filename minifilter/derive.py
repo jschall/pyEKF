@@ -13,13 +13,16 @@ for r in range(P_symmetric.rows):
             P_symmetric[c,r] = P_symmetric[r,c]
 
 def derivePrediction(jsonfile):
-    errQuat = rot_vec_to_quat_approx(rotErr)
-    truthQuat = quat_multiply(q, errQuat)
-    Tbn = quat_to_matrix(truthQuat)
-    deltaQuat = rot_vec_to_quat_approx(dAngMeas)
-    truthQuatNew = quat_multiply(truthQuat, deltaQuat)
-    errQuatNew = quat_multiply(quat_inverse(q), truthQuatNew)
-    rotErrNew = quat_to_rot_vec_approx(errQuatNew)
+    dAngTruth = dAngMeas
+    truthQuat = quat_rotate_approx(q, rotErr)
+    truthQuatNew = quat_rotate_approx(truthQuat,dAngTruth)
+
+    # rotation from body frame at time k to earth frame
+    Tbn = quat_to_matrix(truthQuatNew)
+    #Tprevnew = quat_to_matrix(deltaQuat).T
+
+    # states at time k
+    rotErrNew = dAngTruth
     velNEDNew = velNED+gravityNED*dt+Tbn*dVelMeas
 
     # f: state transtition model
@@ -44,16 +47,14 @@ def derivePrediction(jsonfile):
     P_n = F*P*F.T + Q
 
     # q_n: reference quaternion after prediction step
-    #q_n = q
-    q_n = quat_normalize(quat_multiply(q, rot_vec_to_quat(x_n[0:3,0])))
-    x_n[0:3,0] = (0.,0.,0.)
+    q_n = quat_normalize(quat_multiply(q,rot_vec_to_quat(rotErr)))
 
     # assume symmetry
     P_n = P_n.subs(zip(P, P_symmetric))
 
     x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
 
-    saveExprsToJSON(jsonfile, {'Tbn': Tbn, 'x_n': x_n, 'P_n':P_n, 'q_n': q_n, 'subexp':subexp})
+    saveExprsToJSON(jsonfile, {'x_n': x_n, 'P_n':P_n, 'q_n': q_n, 'subexp':subexp})
 
 def deriveUpdate(jsonfile):
     # P_n: covariance matrix after update step
@@ -61,6 +62,9 @@ def deriveUpdate(jsonfile):
 
     # x_n: state vector after update step
     x_n = x
+
+    # q_n: reference quaternion after update step
+    q_n = q
 
     # h: predicted measurement
     h = velNED
@@ -79,9 +83,6 @@ def deriveUpdate(jsonfile):
         x_n = x_n + K*y[i]
 
         P_n = (eye(nStates)-K*H)*P_n
-
-    # q_n: reference quaternion after update step
-    q_n = q
 
     x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
 

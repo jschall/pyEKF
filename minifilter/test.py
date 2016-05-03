@@ -6,14 +6,15 @@ from helpers import *
 
 import symbols
 from random import gauss
+import math
 
 class Filter:
-    def __init__(self, predictjson, updatejson):
+    def __init__(self, predictjson, updatejson, w_u):
         self.gravity = 9.81
-        self.w_u = toVec(.0003,.0003,.0003,.0025,.0025,.0025)
+        self.w_u = w_u
         self.q = toVec(1.,0.,0.,0.)
-        self.x = toVec(0.,0.,0.,0.,0.,0.)
-        self.P = diag(.1**2,.1**2,.1**2,.1**2,.1**2,.1**2)
+        self.x = toVec(0.0000001,0.,0.,0.,0.,0.)
+        self.P = diag(.2**2,.2**2,.2**2,.1**2,.1**2,.1**2)
         self.R_VEL = 0.5
 
         self.predict_x, self.predict_P, self.predict_q, self.predict_subexp = loadExprsFromJSON(predictjson, ('x_n', 'P_n', 'q_n', 'subexp'))
@@ -57,16 +58,29 @@ class Filter:
         self.P = Matrix(self.update_P(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
         self.q = Matrix(self.update_q(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
 
-f = Filter('minipredict.json', 'miniupdate.json')
+dt = 0.01
+w_u = toVec(.03,.03,.03,.25,.25,.25)*dt
+f = Filter('minipredict.json', 'miniupdate.json', w_u)
 
-from visual import *
+frames = []
 
-for i in range(100):
-    imunoise = toVec(map(lambda x: gauss(0.,x),toVec(.0003,.0003,.0003,.0025,.0025,.0025)))
-    f.predict(0.01, toVec(0.0,0.0,0.0,0.1,0.0,-0.0981)+imunoise)
+t = 0.
+while t < 20:
+    t += dt
+    imunoise = toVec(map(lambda x: gauss(0.,x),w_u))
+    f.predict(dt, toVec(0.0,0.0,math.radians(2000)*dt,0.0,0.0,-9.81*dt)+imunoise)
     velnoise = toVec(gauss(0.,0.5),gauss(0.,0.5),gauss(0.,0.5))
     f.update(velnoise)
+    print t
     pprint(f.x)
     pprint(f.P)
     pprint(f.q)
+    frames.append((t,f.x,f.P,f.q))
     print "\n\n"
+
+import matplotlib.pyplot as plt
+
+plt.plot([x[0] for x in frames], [x[1][3] for x in frames])
+plt.plot([x[0] for x in frames], [x[1][4] for x in frames])
+plt.plot([x[0] for x in frames], [x[1][5] for x in frames])
+plt.show()
