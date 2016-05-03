@@ -23,9 +23,8 @@ def rot_vec_to_quat_approx(_v):
     v = toVec(_v)
     return toVec(1.,v*0.5)
 
-def rot_vec_to_quat_approx2(_v):
-    v = toVec(_v)
-    return toVec(1.-0.5*sqrt(v[0]**2+v[1]**2+v[2]**2),v*0.5)
+def quat_rotate_approx(_q, _v):
+    return quat_multiply(_q,rot_vec_to_quat_approx(_v))
 
 def quat_to_rot_vec(_q):
     q = toVec(_q)
