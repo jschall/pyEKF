@@ -4,19 +4,22 @@ from sys import exit
 import math
 
 # Parameters
-estQuat = toVec(symbols('q0 q1 q2 q3'))
 dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
 gravityNED = toVec(0.,0.,symbols('gravity'))
 dt = Symbol('dt')
-R_TAS, R_BETA, R_MAG = symbols('R_TAS R_BETA R_MAG')
+ptd = Symbol('ptd')
+R_TAS = toVec(Symbol('R_TAS'))
+R_BETA = toVec(Symbol('R_BETA'))
+R_MAG = toVec(Symbol('R_MAG'))
+R_LOS = toVec(Symbol('R_LOS'))
 
 # Inputs
 dAngMeas = toVec(symbols('dax day daz'))
 dVelMeas = toVec(symbols('dvx dvy dvz'))
 
 # States
-rotErr = toVec(symbols('rotErrX rotErrY rotErrZ'))
+estQuat = toVec(symbols('q0 q1 q2 q3'))
 vn,ve,vd = symbols('vn ve vd')
 velNED = toVec(vn,ve,vd)
 posNED = toVec(symbols('pn pe pd'))
@@ -27,8 +30,9 @@ magBody = toVec(symbols('magX magY magZ'))
 magNED = toVec(symbols('magN magE magD'))
 vwn, vwe = symbols('vwn vwe')
 windNED = toVec(vwn,vwe,0.)
-stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
+stateVector = toVec(estQuat,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
+stateVectorIndexed = toVec(symbols('x[0:%u]' % (nStates)))
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
@@ -38,19 +42,22 @@ for r in range(P_symmetric.rows):
         if r > c:
             P_symmetric[c,r] = P_symmetric[r,c]
 
-# Common computations
-errQuat = rot_vec_to_quat_approx(rotErr)
-truthQuat = quat_multiply(estQuat, errQuat)
-Tbn = quat_to_matrix(truthQuat)
-
 def deriveCovariancePrediction(jsonfile):
-    # Prediction step
+    # The prediction step predicts the state at time k+1 as a function of the
+    # state at time k and the control inputs. This attitude estimation EKF is
+    # formulated with the IMU data as control inputs rather than observations.
+
+    # Rotation vector from body frame at time k to body frame at time k+1
     dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias
-    deltaQuat = rot_vec_to_quat_approx(dAngTruth)
-    truthQuatNew = quat_multiply(truthQuat, deltaQuat)
-    errQuatNew = quat_multiply(quat_inverse(estQuat), truthQuatNew)
-    rotErrNew = quat_to_rot_vec_approx(errQuatNew)
+
+    # Rotation matrix from body frame at time k to earth frame
+    Tbn = quat_to_matrix(estQuat)
+
+    # Change in velocity from time k to time k+1 in body frame at time k+1
     dVelTruth = dVelMeas - dVelBias
+
+    # States at time k+1
+    estQuatNew = quat_rotate_approx(estQuat, dAngTruth)
     velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
     posNEDNew = posNED+velNED*dt
     dAngBiasNew = dAngBias
@@ -62,137 +69,99 @@ def deriveCovariancePrediction(jsonfile):
     vweNew = vwe
 
     # f: state-transtition model
-    f = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+    f = toVec(estQuatNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
 
     # F: linearized state-transition model
     F = f.jacobian(stateVector)
-    F = F.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
     # u: control input vector
     u = toVec(dAngMeas,dVelMeas)
 
     # G: control-influence matrix, AKA "B" in literature
     G = f.jacobian(u)
-    G = G.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
 
-    # additive noise on u
-    distVector = toVec(dAngNoise, dVelNoise)
+    # w_u_sigma: additive noise on u
+    w_u_sigma = toVec(dAngNoise, dVelNoise)
 
-    # covariance of additive noise on u
-    distMatrix = diag(*distVector.multiply_elementwise(distVector))
+    # Q_u: covariance of additive noise on u
+    Q_u = diag(*w_u_sigma.multiply_elementwise(w_u_sigma))
 
-    # covariance of additive noise on x
-    Q = G*distMatrix*G.T
+    # Q: covariance of additive noise on x
+    Q = G*Q_u*G.T
 
-    # PP: predicted covariance matrix
-    PP = F*P*F.T + Q
+    # Pn: covariance matrix at time k+1
+    Pn = F*P*F.T + Q
 
     # Optimizations
-    PP_O = PP
+    Pn_O = Pn
 
     # assume that the P matrix is symmetrical
-    PP_O = PP_O.subs(zip(P, P_symmetric))
+    Pn_O = Pn_O.subs(zip(P, P_symmetric))
 
-    # zero the lower off-diagonals
-    for r in range(PP_O.rows):
-        for c in range(PP_O.cols):
-            if r > c:
-                PP_O[r,c] = 0.
+    # zero the lower off-diagonals before extracting subexpressions
+    Pn_O = zero_lower_offdiagonals(Pn_O)
 
-    PP_O,PP_S = extractSubexpressions(PP_O,'PP_S')
+    Pn_O,subx = extractSubexpressions(Pn_O,'subx')
 
-    saveExprsToJSON(jsonfile, {'PP':PP, 'PP_O':PP_O, 'PP_S':PP_S})
+    # make Pn_O symmetric
+    Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
-def deriveCovarianceRotation(jsonfile):
-    Tprevnew = rot_vec_to_matrix(rotErr).T
-    rotErrNew = Tprevnew*rotErr
-    velNEDNew = velNED
-    posNEDNew = posNED
-    dAngBiasNew = dAngBias#Tprevnew*dAngBias
-    dAngScaleNew = dAngScale#Tprevnew*dAngScale
-    dVelBiasNew = dVelBias#Tprevnew*dVelBias
-    magNEDNew = magNED
-    magBodyNew = magBody#Tprevnew*magBody
-    vwnNew = vwn
-    vweNew = vwe
+    saveExprsToJSON(jsonfile, {'Pn_O':Pn_O, 'subx':subx})
 
-    stateVectorNew = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+def deriveFusionSequential(jsonfile,measPred,R):
+    assert isinstance(measPred,MatrixBase) and isinstance(R,MatrixBase) and R.shape[0] == R.shape[1] == 1
 
-    psi = stateVectorNew.jacobian(stateVector)
+    H = measPred.jacobian(stateVector)
 
-    PP = psi*P*psi.T
+    nObs = measPred.rows
+    S_O = [None for _ in range(nObs)]
+    K_O = [None for _ in range(nObs)]
+    Pn_O = [None for _ in range(nObs)]
 
-    # Optimizations
-    PP_O = PP
-    PP_O = PP_O.subs(zip(P, P_symmetric))
+    for i in range(nObs):
+        S_O[i] = (H.row(i)*P*H.row(i).T + R)[0]
+        K_O[i] = (P*H.row(i).T)/S_O[i]
+        Pn_O[i] = (eye(nStates)-K_O[i]*H.row(i))*P
+        Pn_O[i] = zero_lower_offdiagonals(Pn_O[i])
 
-    # zero the lower off-diagonals
-    for r in range(PP_O.rows):
-        for c in range(PP_O.cols):
-            if r > c:
-                PP_O[r,c] = 0.
+        subs = zip(P, P_symmetric)
+        S_O[i] = S_O[i].subs(subs)
+        K_O[i] = K_O[i].subs(subs)
+        Pn_O[i] = Pn_O[i].subs(subs)
 
-    PP_O,PP_S = extractSubexpressions(PP_O,'PP_S')
 
-    saveExprsToJSON(jsonfile, {'PP':PP, 'PP_O':PP_O, 'PP_S':PP_S})
+    result = extractSubexpressions(S_O+K_O+Pn_O,'subx')
+    S_O = list(result[nObs*0:nObs*1])
+    K_O = list(result[nObs*1:nObs*2])
+    Pn_O = list(result[nObs*2:nObs*3])
+    subx = result[-1]
+
+    Pn_O = map(copy_upper_to_lower_offdiagonals, Pn_O)
+
+    saveExprsToJSON(jsonfile, {'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
 
 def deriveAirspeedFusion(jsonfile):
-    VtasPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
+    measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
 
-    H = VtasPred.jacobian(stateVector)
-
-    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
-
-    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
-    H_O, H_S = extractSubexpressions(H,'H_S')
-
-    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_TAS]]))[0]
-
-    K_O = K.subs(zip(H_sym, H_O)+zip(P,P_symmetric))
-    K = K.subs(zip(H_sym,H))
-
-    K_O, K_S = extractSubexpressions(K_O,'K_S')
-
-    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
+    deriveFusionSequential(jsonfile,measPred,R_TAS)
 
 def deriveBetaFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
     Vbw = Tbn.T*(velNED-windNED)
-    betaPred = Matrix([[Vbw[1]/Vbw[0]]])
+    measPred = Matrix([[Vbw[1]/Vbw[0]]])
 
-    H = betaPred.jacobian(stateVector)
-
-    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
-
-    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
-    H_O, H_S = extractSubexpressions(H,'H_S')
-
-    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_BETA]]))[0]
-    K_O = K.subs(zip(H_sym, H_O)+zip(P,P_symmetric))
-    K = K.subs(zip(H_sym,H))
-
-    K_O, K_S = extractSubexpressions(K_O,'K_S')
-
-    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'K':K, 'K_O':K_O, 'K_S':K_S})
+    deriveFusionSequential(jsonfile,measPred,R_BETA)
 
 def deriveMagFusion(jsonfile):
-    magPred = Tbn.T*magNED+magBody
-    H = magPred.jacobian(stateVector)
+    Tbn = quat_to_matrix(estQuat)
+    measPred = Tbn.T*magNED+magBody
 
-    H_sym = Matrix(1,nStates,symbols('H[0:%u][0:%u]' % (1,nStates)))
+    deriveFusionSequential(jsonfile,measPred,R_MAG)
 
-    H = H.subs([(rotErr[0], 0.),(rotErr[1], 0.),(rotErr[2], 0.)])
+def deriveOptFlowFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    velBody = Tbn.T*velNED
+    rangeToGroud = ((ptd-pd)/Tbn[2,2])
+    measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
 
-    H_O, H_S = extractSubexpressions(H,'H_S')
-
-    K = (P*H_sym.T)/(H_sym*P*H_sym.T + Matrix([[R_MAG]]))[0]
-
-    KX = K.subs(zip(H_sym,H.row(0)))
-    KY = K.subs(zip(H_sym,H.row(1)))
-    KZ = K.subs(zip(H_sym,H.row(2)))
-    KX_O = K.subs(zip(H_sym,H_O.row(0))+zip(P,P_symmetric))
-    KY_O = K.subs(zip(H_sym,H_O.row(1))+zip(P,P_symmetric))
-    KZ_O = K.subs(zip(H_sym,H_O.row(2))+zip(P,P_symmetric))
-
-    KX_O, KY_O, KZ_O, K_S = extractSubexpressions([KX_O,KY_O,KZ_O],'K_S')
-
-    saveExprsToJSON(jsonfile, {'H':H, 'H_O':H_O, 'H_S':H_S, 'KX_O':KX, 'KY_O':KY, 'KZ_O':KZ, 'K_S':K_S})
+    deriveFusionSequential(jsonfile,H,R_LOS)

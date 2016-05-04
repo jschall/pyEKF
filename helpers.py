@@ -72,6 +72,20 @@ def quat_normalize(_q):
     q = toVec(_q)
     return q/sqrt(q[0]**2+q[1]**2+q[2]**2+q[3]**2)
 
+def zero_lower_offdiagonals(m):
+    for r in range(m.rows):
+        for c in range(m.cols):
+            if r > c:
+                m[r,c] = 0.
+    return m
+
+def copy_upper_to_lower_offdiagonals(m):
+    for r in range(m.rows):
+        for c in range(m.cols):
+            if r > c:
+                m[r,c] = m[c,r]
+    return m
+
 def count_subexpression(subexpr, expr):
     if hasattr(expr, "__getitem__"):
         return sum(map(lambda x: count_subexpression(subexpr, x), expr))
