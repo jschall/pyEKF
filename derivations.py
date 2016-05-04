@@ -13,22 +13,23 @@ R_TAS = toVec(Symbol('R_TAS'))
 R_BETA = toVec(Symbol('R_BETA'))
 R_MAG = toVec(Symbol('R_MAG'))
 R_LOS = toVec(Symbol('R_LOS'))
+R_YAW = toVec(Symbol('R_YAW'))
 
 # Inputs
 dAngMeas = toVec(symbols('dax day daz'))
 dVelMeas = toVec(symbols('dvx dvy dvz'))
 
 # States
-estQuat = toVec(symbols('q0 q1 q2 q3'))
-vn,ve,vd = symbols('vn ve vd')
+estQuat = toVec(symbols('Q0 Q1 Q2 Q3'))
+vn,ve,vd = symbols('VN VE VD')
 velNED = toVec(vn,ve,vd)
-posNED = toVec(symbols('pn pe pd'))
-dAngBias = toVec(symbols('dax_b day_b daz_b'))
-dAngScale = toVec(symbols('dax_s day_s daz_s'))
-dVelBias = toVec(0,0,symbols('dvz_b'))
-magBody = toVec(symbols('magX magY magZ'))
-magNED = toVec(symbols('magN magE magD'))
-vwn, vwe = symbols('vwn vwe')
+posNED = toVec(symbols('PN PE PD'))
+dAngBias = toVec(symbols('DAXB DAYB DAZB'))
+dAngScale = toVec(symbols('DAXS DAYB DAZB'))
+dVelBias = toVec(0,0,symbols('DVZB'))
+magBody = toVec(symbols('MAGX MAGY MAGZ'))
+magNED = toVec(symbols('MAGN MAGE MAGD'))
+vwn, vwe = symbols('VWN VWE')
 windNED = toVec(vwn,vwe,0.)
 stateVector = toVec(estQuat,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
@@ -106,7 +107,45 @@ def deriveCovariancePrediction(jsonfile):
     # make Pn_O symmetric
     Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
-    saveExprsToJSON(jsonfile, {'Pn_O':Pn_O, 'subx':subx})
+    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'Pn_O':Pn_O,'subx':subx})
+
+def deriveAirspeedFusion(jsonfile):
+    measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
+
+    deriveFusionSequential(jsonfile,measPred,R_TAS)
+
+def deriveBetaFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    Vbw = Tbn.T*(velNED-windNED)
+    measPred = Matrix([[Vbw[1]/Vbw[0]]])
+
+    deriveFusionSequential(jsonfile,measPred,R_BETA)
+
+def deriveMagFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    measPred = Tbn.T*magNED+magBody
+
+    deriveFusionSequential(jsonfile,measPred,R_MAG)
+
+def deriveOptFlowFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    velBody = Tbn.T*velNED
+    rangeToGroud = ((ptd-pd)/Tbn[2,2])
+    measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
+
+    deriveFusionSequential(jsonfile,measPred,R_LOS)
+
+def deriveYaw321Fusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    measPred = atan(Tbn[1,0]/Tbn[0,0])
+
+    deriveFusionSequential(jsonfile,measPred,R_YAW)
+
+def deriveYaw312Fusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    measPred = atan(-Tbn[0,1]/Tbn[1,1])
+
+    deriveFusionSequential(jsonfile,measPred,R_YAW)
 
 def deriveFusionSequential(jsonfile,measPred,R):
     assert isinstance(measPred,MatrixBase) and isinstance(R,MatrixBase) and R.shape[0] == R.shape[1] == 1
@@ -138,30 +177,4 @@ def deriveFusionSequential(jsonfile,measPred,R):
 
     Pn_O = map(copy_upper_to_lower_offdiagonals, Pn_O)
 
-    saveExprsToJSON(jsonfile, {'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
-
-def deriveAirspeedFusion(jsonfile):
-    measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
-
-    deriveFusionSequential(jsonfile,measPred,R_TAS)
-
-def deriveBetaFusion(jsonfile):
-    Tbn = quat_to_matrix(estQuat)
-    Vbw = Tbn.T*(velNED-windNED)
-    measPred = Matrix([[Vbw[1]/Vbw[0]]])
-
-    deriveFusionSequential(jsonfile,measPred,R_BETA)
-
-def deriveMagFusion(jsonfile):
-    Tbn = quat_to_matrix(estQuat)
-    measPred = Tbn.T*magNED+magBody
-
-    deriveFusionSequential(jsonfile,measPred,R_MAG)
-
-def deriveOptFlowFusion(jsonfile):
-    Tbn = quat_to_matrix(estQuat)
-    velBody = Tbn.T*velNED
-    rangeToGroud = ((ptd-pd)/Tbn[2,2])
-    measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
-
-    deriveFusionSequential(jsonfile,H,R_LOS)
+    saveExprsToJSON(jsonfile, {'X':stateVector,'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
