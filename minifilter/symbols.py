@@ -26,7 +26,7 @@ dVelNoise = w_u[3:6,0]
 # States
 nStates = 6
 x = Matrix(nStates,1,symbols('x_0:%u' % (nStates,)))
-rotErr = x[0:3,0]
+rotVec = x[0:3,0]
 velNED = x[3:6,0]
 
 # Covariance matrix

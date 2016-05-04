@@ -12,8 +12,8 @@ class Filter:
     def __init__(self, predictjson, updatejson, w_u):
         self.gravity = 9.81
         self.w_u = w_u
-        self.q = toVec(1.,0.,0.,0.)
-        self.x = toVec(0.0000001,0.,0.,0.,0.,0.)
+        self.q = toVec(.707,.707,0.,0.)
+        self.x = toVec(0.,0.,0.,0.,0.,0.)
         self.P = diag(.2**2,.2**2,.2**2,.1**2,.1**2,.1**2)
         self.R_VEL = 0.5
 
@@ -42,9 +42,15 @@ class Filter:
         for i in range(len(subexprs)):
             subexprs[i] = self.predict_subexp[i](subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u)
 
-        self.x = Matrix(self.predict_x(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
-        self.P = Matrix(self.predict_P(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
-        self.q = Matrix(self.predict_q(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
+
+        x_n = Matrix(self.predict_x(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
+        P_n = Matrix(self.predict_P(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
+        q_n = Matrix(self.predict_q(subexprs,self.gravity,self.w_u,self.q,self.x,self.P,dt,u))
+
+        self.x = x_n
+        self.P = P_n
+        self.q = q_n
+
 
     def update(self, velNEDMeas):
         velNEDMeas = toVec(velNEDMeas)
@@ -54,9 +60,13 @@ class Filter:
         for i in range(len(subexprs)):
             subexprs[i] = self.update_subexp[i](subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas)
 
-        self.x = Matrix(self.update_x(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
-        self.P = Matrix(self.update_P(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
-        self.q = Matrix(self.update_q(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
+        x_n = Matrix(self.update_x(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
+        P_n = Matrix(self.update_P(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
+        q_n = Matrix(self.update_q(subexprs,self.q,self.x,self.P,self.R_VEL,velNEDMeas))
+
+        self.x = x_n
+        self.P = P_n
+        self.q = q_n
 
 dt = 0.01
 w_u = toVec(.03,.03,.03,.25,.25,.25)*dt
@@ -68,8 +78,8 @@ t = 0.
 while t < 20:
     t += dt
     imunoise = toVec(map(lambda x: gauss(0.,x),w_u))
-    f.predict(dt, toVec(0.0,0.0,math.radians(2000)*dt,0.0,0.0,-9.81*dt)+imunoise)
     velnoise = toVec(gauss(0.,0.5),gauss(0.,0.5),gauss(0.,0.5))
+    f.predict(dt, toVec(0.0,0.0,0.0,0.0,0.0,-9.81*dt)+imunoise)
     f.update(velnoise)
     print t
     pprint(f.x)

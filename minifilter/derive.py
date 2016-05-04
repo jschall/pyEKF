@@ -13,20 +13,26 @@ for r in range(P_symmetric.rows):
             P_symmetric[c,r] = P_symmetric[r,c]
 
 def derivePrediction(jsonfile):
+    # The prediction step predicts the state at time k+1 as a function of the
+    # state at time k and the control inputs. This attitude estimation EKF is
+    # formulated with the IMU data as control inputs rather than observations.
+
+    # Rotation from body frame at time k to body frame at time k+1
     dAngTruth = dAngMeas
-    truthQuat = quat_rotate_approx(q, rotErr)
+
+    # Rotation from body frame at time k to earth frame
+    truthQuat = quat_rotate_approx(q, rotVec)
+
+    # Rotation from body frame at time k+1 to earth frame
     truthQuatNew = quat_rotate_approx(truthQuat,dAngTruth)
-
-    # rotation from body frame at time k to earth frame
     Tbn = quat_to_matrix(truthQuatNew)
-    #Tprevnew = quat_to_matrix(deltaQuat).T
 
-    # states at time k
-    rotErrNew = dAngTruth
+    # States at time k+1
+    rotVecNew = dAngTruth
     velNEDNew = velNED+gravityNED*dt+Tbn*dVelMeas
 
     # f: state transtition model
-    f = toVec(rotErrNew, velNEDNew)
+    f = toVec(rotVecNew, velNEDNew)
 
     # F: linearized state-transition model
     F = f.jacobian(x)
@@ -47,7 +53,7 @@ def derivePrediction(jsonfile):
     P_n = F*P*F.T + Q
 
     # q_n: reference quaternion after prediction step
-    q_n = quat_normalize(quat_multiply(q,rot_vec_to_quat(rotErr)))
+    q_n = quat_normalize(quat_rotate_approx(q,rotVec))
 
     # assume symmetry
     P_n = P_n.subs(zip(P, P_symmetric))
@@ -83,6 +89,10 @@ def deriveUpdate(jsonfile):
         x_n = x_n + K*y[i]
 
         P_n = (eye(nStates)-K*H)*P_n
+
+    # assume symmetry
+    x_n = x_n.subs(zip(P, P_symmetric))
+    P_n = P_n.subs(zip(P, P_symmetric))
 
     x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
 
