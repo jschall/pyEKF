@@ -7,6 +7,8 @@ def toVec(*args):
 
 def skew(_v):
     v = toVec(_v)
+    assert v.rows == 3
+
     return Matrix([
         [0, -v[2], v[1]],
         [v[2], 0, -v[0]],
@@ -15,46 +17,40 @@ def skew(_v):
 
 def rot_vec_to_quat(_v):
     v = toVec(_v)
+    assert v.rows == 3
+
     theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
     axis = v/theta
     return toVec(cos(theta/2.), sin(theta/2.) * axis[0], sin(theta/2.) * axis[1], sin(theta/2.) * axis[2])
 
 def rot_vec_to_quat_approx(_v):
     v = toVec(_v)
+    assert v.rows == 3
+
     return toVec(1.,v*0.5)
+
+def quat_to_rot_vec_approx(_q):
+    q = toVec(_q)
+    assert q.rows == 4
+
+    return 2.*toVec(q[1],q[2],q[3])
 
 def quat_rotate_approx(_q, _v):
     return quat_multiply(_q,rot_vec_to_quat_approx(_v))
 
 def quat_to_rot_vec(_q):
     q = toVec(_q)
+    assert q.rows == 4
 
     theta = 2.*acos(q[0])
     axis = toVec(q[1],q[2],q[3])/sqrt(q[1]**2+q[2]**2+q[3]**2)
 
     return theta*axis
 
-def quat_to_rot_vec_approx(_q):
-    q = toVec(_q)
-    return 2.*toVec(q[1],q[2],q[3])
-
-def quat_to_rot_vec_approx2(_q):
-    q = toVec(_q)
-
-    return 2.*toVec(q[1],q[2],q[3])/q[0]
-
-def quat_to_matrix(_q):
-    q = toVec(_q)
-    return (q[0]**2-(q[1:,0].T*q[1:,0])[0])*eye(3) + 2.*(q[1:,0]*q[1:,0].T) + 2.*q[0]*skew(q[1:,0])
-
-def rot_vec_to_matrix(_v):
-    v = toVec(_v)
-    theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
-    axis = v/theta
-    return eye(3)*cos(theta)+(1-cos(theta))*axis*axis.T+skew(axis)*sin(theta)
-
 def quat_inverse(_q):
     q = toVec(_q)
+    assert q.rows == 4
+
     q[1] = -q[1]
     q[2] = -q[2]
     q[3] = -q[3]
@@ -63,6 +59,8 @@ def quat_inverse(_q):
 def quat_multiply(_q1, _q2):
     q1 = toVec(_q1)
     q2 = toVec(_q2)
+    assert q1.rows == 4 and q2.rows == 4
+
     return toVec(q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
                  q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2],
                  q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
@@ -70,21 +68,41 @@ def quat_multiply(_q1, _q2):
 
 def quat_normalize(_q):
     q = toVec(_q)
+    assert q.rows == 4
+
     return q/sqrt(q[0]**2+q[1]**2+q[2]**2+q[3]**2)
 
-def zero_lower_offdiagonals(m):
-    for r in range(m.rows):
-        for c in range(m.cols):
-            if r > c:
-                m[r,c] = 0.
-    return m
+def quat_to_matrix(_q):
+    q = toVec(_q)
+    assert q.rows == 4
 
-def copy_upper_to_lower_offdiagonals(m):
-    for r in range(m.rows):
-        for c in range(m.cols):
+    return (q[0]**2-(q[1:,0].T*q[1:,0])[0])*eye(3) + 2.*(q[1:,0]*q[1:,0].T) + 2.*q[0]*skew(q[1:,0])
+
+def rot_vec_to_matrix(_v):
+    v = toVec(_v)
+    assert v.rows == 3
+
+    theta = sqrt(v[0]**2+v[1]**2+v[2]**2)
+    axis = v/theta
+    return eye(3)*cos(theta)+(1-cos(theta))*axis*axis.T+skew(axis)*sin(theta)
+
+def zero_lower_offdiagonals(M):
+    assert isinstance(M,MatrixBase) and M.rows == M.cols
+
+    for r in range(M.rows):
+        for c in range(M.cols):
             if r > c:
-                m[r,c] = m[c,r]
-    return m
+                M[r,c] = 0.
+    return M
+
+def copy_upper_to_lower_offdiagonals(M):
+    assert isinstance(M,MatrixBase) and M.rows == M.cols
+
+    for r in range(M.rows):
+        for c in range(M.cols):
+            if r > c:
+                M[r,c] = M[c,r]
+    return M
 
 def count_subexpression(subexpr, expr):
     if hasattr(expr, "__getitem__"):
@@ -133,3 +151,11 @@ def saveExprsToJSON(fname, expr_dict):
             save_dict[k] = srepr(v)
 
         json.dump(save_dict, f)
+
+def symmetricMatrixToList(M):
+    assert M.rows == M.cols
+
+    N = M.rows
+    r = lambda k: int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
+    c = lambda k: int(k - N*r + r*(r-1)/2 + r)
+    return [M[r(k),c(k)] for k in range((N**2-N)/2+N)]
