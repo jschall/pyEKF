@@ -46,6 +46,7 @@ for r in range(P_symmetric.rows):
             P_symmetric[c,r] = P_symmetric[r,c]
 
 def deriveCovariancePrediction(jsonfile):
+    print('Beginning covariance prediction derivation')
     # The prediction step predicts the state at time k+1 as a function of the
     # state at time k and the control inputs. This attitude estimation EKF is
     # formulated with the IMU data as control inputs rather than observations.
@@ -167,6 +168,7 @@ def deriveDeclinationFusion(jsonfile):
 
 def deriveFusionSequential(fusionName,jsonfile,measPred,R):
     assert isinstance(measPred,MatrixBase) and isinstance(R,MatrixBase) and R.shape[0] == R.shape[1] == 1
+    print('Beginning %s fusion derivation' % (fusionName,))
 
     H = measPred.jacobian(stateVector)
 
