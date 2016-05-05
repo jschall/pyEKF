@@ -150,19 +150,19 @@ def deriveOptFlowFusion(jsonfile):
 
 def deriveYaw321Fusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
-    measPred = atan(Tbn[1,0]/Tbn[0,0])
+    measPred = Matrix([[atan(Tbn[1,0]/Tbn[0,0])]])
 
     deriveFusionSequential('Yaw321',jsonfile,measPred,R_YAW)
 
 def deriveYaw312Fusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
-    measPred = atan(-Tbn[0,1]/Tbn[1,1])
+    measPred = Matrix([[atan(-Tbn[0,1]/Tbn[1,1])]])
 
     deriveFusionSequential('Yaw312',jsonfile,measPred,R_YAW)
 
 def deriveDeclinationFusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
-    measPred = atan(magNED[1]/magNED[0])
+    measPred = Matrix([[atan(magNED[1]/magNED[0])]])
 
     deriveFusionSequential('Declination',jsonfile,measPred,R_YAW)
 
