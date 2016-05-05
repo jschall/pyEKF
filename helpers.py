@@ -1,4 +1,5 @@
 from sympy import *
+import math
 import itertools
 
 def toVec(*args):
@@ -157,5 +158,5 @@ def symmetricMatrixToList(M):
 
     N = M.rows
     r = lambda k: int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
-    c = lambda k: int(k - N*r + r*(r-1)/2 + r)
+    c = lambda k: int(k - N*r(k) + r(k)*(r(k)-1)/2 + r(k))
     return [M[r(k),c(k)] for k in range((N**2-N)/2+N)]

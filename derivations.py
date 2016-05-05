@@ -14,29 +14,31 @@ R_BETA = toVec(Symbol('R_BETA'))
 R_MAG = toVec(Symbol('R_MAG'))
 R_LOS = toVec(Symbol('R_LOS'))
 R_YAW = toVec(Symbol('R_YAW'))
+R_DECL = toVec(Symbol('R_DECL'))
 
 # Inputs
 dAngMeas = toVec(symbols('dax day daz'))
 dVelMeas = toVec(symbols('dvx dvy dvz'))
 
 # States
-estQuat = toVec(symbols('Q0 Q1 Q2 Q3'))
-vn,ve,vd = symbols('VN VE VD')
+estQuat = toVec(symbols('q0 q1 q2 q3'))
+rotErr = toVec(symbols('rex rey rez'))
+vn,ve,vd = symbols('vn ve vd')
 velNED = toVec(vn,ve,vd)
-posNED = toVec(symbols('PN PE PD'))
-dAngBias = toVec(symbols('DAXB DAYB DAZB'))
-dAngScale = toVec(symbols('DAXS DAYB DAZB'))
-dVelBias = toVec(0,0,symbols('DVZB'))
-magBody = toVec(symbols('MAGX MAGY MAGZ'))
-magNED = toVec(symbols('MAGN MAGE MAGD'))
-vwn, vwe = symbols('VWN VWE')
+posNED = toVec(symbols('pn pe pd'))
+dAngBias = toVec(symbols('dax_b day_b daz_b'))
+dAngScale = toVec(symbols('dax_s day_s daz_s'))
+dVelBias = toVec(0.,0.,symbols('dvz_b'))
+magBody = toVec(symbols('magx magy magz'))
+magNED = toVec(symbols('magn mage magd'))
+vwn, vwe = symbols('vwn vwe')
 windNED = toVec(vwn,vwe,0.)
-stateVector = toVec(estQuat,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
+stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
-stateVectorIndexed = toVec(symbols('x[0:%u]' % (nStates)))
+stateVectorIndexed = toVec(symbols('_STATE[0:%u]'%(nStates,)))
 
 # Covariance matrix
-P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
+P = Matrix(nStates,nStates,symbols('_COV[0:%u][0:%u]' % (nStates,nStates)))
 P_symmetric = P
 for r in range(P_symmetric.rows):
     for c in range(P_symmetric.cols):
@@ -51,14 +53,19 @@ def deriveCovariancePrediction(jsonfile):
     # Rotation vector from body frame at time k to body frame at time k+1
     dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias
 
+    truthQuat = quat_rotate_approx(estQuat,rotErr)
+    truthQuatNew = quat_rotate_approx(truthQuat,dAngTruth)
+    errQuatNew = quat_multiply(quat_inverse(estQuat),truthQuatNew)
+
     # Rotation matrix from body frame at time k to earth frame
-    Tbn = quat_to_matrix(estQuat)
+    Tbn = quat_to_matrix(truthQuat)
 
     # Change in velocity from time k to time k+1 in body frame at time k+1
     dVelTruth = dVelMeas - dVelBias
 
     # States at time k+1
-    estQuatNew = quat_rotate_approx(estQuat, dAngTruth)
+    #estQuatNew = quat_rotate_approx(estQuat, dAngTruth)
+    rotErrNew = quat_to_rot_vec_approx(errQuatNew)
     velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
     posNEDNew = posNED+velNED*dt
     dAngBiasNew = dAngBias
@@ -70,7 +77,8 @@ def deriveCovariancePrediction(jsonfile):
     vweNew = vwe
 
     # f: state-transtition model
-    f = toVec(estQuatNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+    f = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
+    assert f.shape == stateVector.shape
 
     # F: linearized state-transition model
     F = f.jacobian(stateVector)
@@ -97,35 +105,39 @@ def deriveCovariancePrediction(jsonfile):
     Pn_O = Pn
 
     # assume that the P matrix is symmetrical
-    Pn_O = Pn_O.subs(zip(P, P_symmetric))
+    Pn_O = Pn_O.subs(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed))
 
     # zero the lower off-diagonals before extracting subexpressions
     Pn_O = zero_lower_offdiagonals(Pn_O)
 
-    Pn_O,subx = extractSubexpressions(Pn_O,'subx')
+    Pn_O,subx = extractSubexpressions(Pn_O,'_SUBX')
 
     # make Pn_O symmetric
     Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
     saveExprsToJSON(jsonfile, {'stateVector':stateVector,'Pn_O':Pn_O,'subx':subx})
+    print('Covariance predicton derivation saved to %s' % (jsonfile))
+
+    ops = count_ops(Pn_O)+count_ops(subx)
+    print('%u subexpressions, %u ops' % (len(subx),ops))
 
 def deriveAirspeedFusion(jsonfile):
     measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
 
-    deriveFusionSequential(jsonfile,measPred,R_TAS)
+    deriveFusionSequential('Airspeed',jsonfile,measPred,R_TAS)
 
 def deriveBetaFusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
     Vbw = Tbn.T*(velNED-windNED)
     measPred = Matrix([[Vbw[1]/Vbw[0]]])
 
-    deriveFusionSequential(jsonfile,measPred,R_BETA)
+    deriveFusionSequential('Beta',jsonfile,measPred,R_BETA)
 
 def deriveMagFusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
     measPred = Tbn.T*magNED+magBody
 
-    deriveFusionSequential(jsonfile,measPred,R_MAG)
+    deriveFusionSequential('Mag',jsonfile,measPred,R_MAG)
 
 def deriveOptFlowFusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
@@ -133,21 +145,27 @@ def deriveOptFlowFusion(jsonfile):
     rangeToGroud = ((ptd-pd)/Tbn[2,2])
     measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
 
-    deriveFusionSequential(jsonfile,measPred,R_LOS)
+    deriveFusionSequential('Flow',jsonfile,measPred,R_LOS)
 
 def deriveYaw321Fusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
     measPred = atan(Tbn[1,0]/Tbn[0,0])
 
-    deriveFusionSequential(jsonfile,measPred,R_YAW)
+    deriveFusionSequential('Yaw321',jsonfile,measPred,R_YAW)
 
 def deriveYaw312Fusion(jsonfile):
     Tbn = quat_to_matrix(estQuat)
     measPred = atan(-Tbn[0,1]/Tbn[1,1])
 
-    deriveFusionSequential(jsonfile,measPred,R_YAW)
+    deriveFusionSequential('Yaw312',jsonfile,measPred,R_YAW)
 
-def deriveFusionSequential(jsonfile,measPred,R):
+def deriveDeclinationFusion(jsonfile):
+    Tbn = quat_to_matrix(estQuat)
+    measPred = atan(magNED[1]/magNED[0])
+
+    deriveFusionSequential('Declination',jsonfile,measPred,R_YAW)
+
+def deriveFusionSequential(fusionName,jsonfile,measPred,R):
     assert isinstance(measPred,MatrixBase) and isinstance(R,MatrixBase) and R.shape[0] == R.shape[1] == 1
 
     H = measPred.jacobian(stateVector)
@@ -163,13 +181,13 @@ def deriveFusionSequential(jsonfile,measPred,R):
         Pn_O[i] = (eye(nStates)-K_O[i]*H.row(i))*P
         Pn_O[i] = zero_lower_offdiagonals(Pn_O[i])
 
-        subs = zip(P, P_symmetric)
+        subs = zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed)
         S_O[i] = S_O[i].subs(subs)
         K_O[i] = K_O[i].subs(subs)
         Pn_O[i] = Pn_O[i].subs(subs)
 
 
-    result = extractSubexpressions(S_O+K_O+Pn_O,'subx')
+    result = extractSubexpressions(S_O+K_O+Pn_O,'_SUBX')
     S_O = list(result[nObs*0:nObs*1])
     K_O = list(result[nObs*1:nObs*2])
     Pn_O = list(result[nObs*2:nObs*3])
@@ -177,4 +195,7 @@ def deriveFusionSequential(jsonfile,measPred,R):
 
     Pn_O = map(copy_upper_to_lower_offdiagonals, Pn_O)
 
-    saveExprsToJSON(jsonfile, {'X':stateVector,'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
+    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'nObs':nObs,'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
+    print('%s fusion derivation saved to %s' % (fusionName,jsonfile))
+    ops = count_ops(S_O)+count_ops(K_O)+count_ops(Pn_O)+count_ops(subx)
+    print('%u subexpressions, %u ops' % (len(subx),ops))
