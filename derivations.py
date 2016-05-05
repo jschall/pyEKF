@@ -53,6 +53,7 @@ Tbn = quat_to_matrix(truthQuat)
 
 def deriveCovariancePrediction(jsonfile):
     print('Beginning covariance prediction derivation')
+
     # The prediction step predicts the state at time k+1 as a function of the
     # state at time k and the control inputs. This attitude estimation EKF is
     # formulated with the IMU data as control inputs rather than observations.
@@ -111,18 +112,17 @@ def deriveCovariancePrediction(jsonfile):
     Pn_O = zero_lower_offdiagonals(Pn_O)
 
     # assume that the P matrix is symmetrical
-    Pn_O = Pn_O.subs(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed))
+    Pn_O = Pn_O.xreplace(dict(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed)))
 
     Pn_O,subx = extractSubexpressions(Pn_O,'_SUBX')
 
     # make Pn_O symmetric
     Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
-    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'Pn_O':Pn_O,'subx':subx})
-    print('Covariance predicton derivation saved to %s' % (jsonfile))
 
+    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'Pn_O':Pn_O,'subx':subx})
     ops = count_ops(zero_lower_offdiagonals(Pn_O))+count_ops(subx)
-    print('%u subexpressions, %u ops' % (len(subx),ops))
+    print('Covariance predicton: derivation saved to %s. %u subexpressions, %u ops' % (jsonfile,len(subx),ops))
 
 def deriveAirspeedFusion(jsonfile):
     measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
@@ -167,7 +167,6 @@ def deriveFusionSequential(fusionName,jsonfile,measPred,R):
     print('Beginning %s fusion derivation' % (fusionName,))
 
     H = measPred.jacobian(stateVector)
-
     nObs = measPred.rows
     S_O = [None for _ in range(nObs)]
     K_O = [None for _ in range(nObs)]
@@ -179,10 +178,10 @@ def deriveFusionSequential(fusionName,jsonfile,measPred,R):
         Pn_O[i] = (eye(nStates)-K_O[i]*H.row(i))*P
         Pn_O[i] = zero_lower_offdiagonals(Pn_O[i])
 
-        subs = zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed)
-        S_O[i] = S_O[i].subs(subs)
-        K_O[i] = K_O[i].subs(subs)
-        Pn_O[i] = Pn_O[i].subs(subs)
+        substitute = dict(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed))
+        S_O[i] = S_O[i].xreplace(substitute)
+        K_O[i] = K_O[i].xreplace(substitute)
+        Pn_O[i] = Pn_O[i].xreplace(substitute)
 
     result = extractSubexpressions(S_O+K_O+Pn_O,'_SUBX')
     S_O = list(result[nObs*0:nObs*1])
@@ -193,6 +192,5 @@ def deriveFusionSequential(fusionName,jsonfile,measPred,R):
     Pn_O = map(copy_upper_to_lower_offdiagonals, Pn_O)
 
     saveExprsToJSON(jsonfile, {'stateVector':stateVector,'nObs':nObs,'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
-    print('%s fusion derivation saved to %s' % (fusionName,jsonfile))
     ops = count_ops(S_O)+count_ops(K_O)+count_ops(map(zero_lower_offdiagonals, Pn_O))+count_ops(subx)
-    print('%u subexpressions, %u ops' % (len(subx),ops))
+    print('%s fusion: derivation saved to %s. %u subexpressions, %u ops' % (fusionName,jsonfile,len(subx),ops))

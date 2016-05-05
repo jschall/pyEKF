@@ -117,16 +117,16 @@ def extractSubexpressions(inexprs, prefix='X',threshold=10):
     for i in reversed(range(len(subexprs))):
         ops_saved = (count_subexpression(subexprs[i][0], [[x[1] for x in subexprs], outexprs])-1)*subexprs[i][1].count_ops()
         if ops_saved < threshold:
-            sub = subexprs.pop(i)
-            subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
-            outexprs = map(lambda x: x.subs(*sub), outexprs)
+            sub = dict([subexprs.pop(i)])
+            subexprs = map(lambda x: (x[0],x[1].xreplace(sub)), subexprs)
+            outexprs = map(lambda x: x.xreplace(sub), outexprs)
 
     for i in range(len(subexprs)):
         newSym = Symbol('%s[%u]' % (prefix,i))
-        sub = (subexprs[i][0],newSym)
+        sub = {subexprs[i][0]:newSym}
         subexprs[i] = (newSym,subexprs[i][1])
-        subexprs = map(lambda x: (x[0],x[1].subs(*sub)), subexprs)
-        outexprs = map(lambda x: x.subs(*sub), outexprs)
+        subexprs = map(lambda x: (x[0],x[1].xreplace(sub)), subexprs)
+        outexprs = map(lambda x: x.xreplace(sub), outexprs)
 
     return tuple(outexprs+[subexprs])
 
