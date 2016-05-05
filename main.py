@@ -6,13 +6,14 @@ import argparse
 derivations = ['prediction', 'airspeed', 'beta', 'mag', 'yaw', 'flow', 'declination']
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--resultsdir', nargs=1, dest='resultsdir', default='results')
 parser.add_argument('--derive-all', dest='derive_all', action='store_true')
 for x in derivations:
     parser.add_argument('--derive-%s'%(x,), dest='derive_%s'%(x,), action='store_true')
 parser.add_argument('--codegen', dest='codegen', action='store_true')
 args = parser.parse_args()
 
-resultsdir = 'results'
+resultsdir = args.resultsdir[0]
 
 if not os.path.exists(resultsdir):
     os.makedirs(resultsdir)
