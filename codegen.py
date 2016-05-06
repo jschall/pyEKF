@@ -19,16 +19,16 @@ import math
 def generateCode(jsondict, cfile):
     # extract filter operations
     filterOps = {}
-    for k,v in jsondict.iteritems():
+    for n,fn in jsondict.iteritems():
         exprs = loadExprsFromJSON(fn)['exprs']
         if len(exprs) > 1:
             for i in range(len(exprs)):
-                filterOps['%s%s' % (k.upper(),i)] = exprs[i]
+                filterOps['%s%s' % (n.upper(),i)] = exprs[i]
         else:
-            filterOps['%s' % (k.upper(),)] = exprs[0]
+            filterOps['%s' % (n.upper(),)] = exprs[0]
 
     hashdefines = []
-    hashdefines.extend(getConstants(jsondict))
+    hashdefines.extend(getConstants(filterOps))
     for k,v in filterOps.iteritems():
         hashdefines.extend(getSnippets(k,v))
 
@@ -39,19 +39,62 @@ def generateCode(jsondict, cfile):
 
 def getConstants(filterOps):
     max_num_subx = 0
-    for k,v in filterOps:
+    for k,v in filterOps.iteritems():
         max_num_subx = max(len(v['output']['subx']),max_num_subx)
 
-    x = filterOps['prediction']['input']['x']
-    constants = []
-    constants.append(('NUM_STATES', x.rows))
-    constants.append(('MAX_NUM_SUBX', max_num_subx))
+    x = filterOps['PREDICTION']['input']['x']
+    u = filterOps['PREDICTION']['input']['u']
+    ret = []
+    ret.append(('NUM_STATES', x.rows))
+    ret.append(('NUM_CONTROL_INPUTS', u.rows))
+    ret.append(('MAX_NUM_SUBX', max_num_subx))
     for r in range(x.rows):
-        constants.append(('STATEIDX_'+str(x[r,0]).upper(), r))
-    return constants
+        ret.append(('X_IDX_'+str(x[r,0]).upper(), r))
+    for r in range(u.rows):
+        ret.append(('U_IDX_'+str(u[r,0]).upper(), r))
+    return ret
 
 def getSnippets(name, op):
-    pass
+    ret = []
+
+    params = []
+    substitutions = []
+    for k in sorted(op['input'].keys()):
+        if not isinstance(op['input'][k], MatrixBase):
+            op['input'][k] = Matrix([[op['input'][k]]])
+
+        nr,nc = op['input'][k].shape
+
+        params.append('__'+k.upper())
+
+        if (nr,nc) == (1,1):
+            substitutions += zip(op['input'][k],Matrix(nr,nc,[Symbol(params[-1])]))
+        elif nc == 1:
+            substitutions += zip(op['input'][k],Matrix(nr,nc,symbols(params[-1]+'[0:%u]'%(nr,))))
+        else:
+            substitutions += zip(op['input'][k],Matrix(nr,nc,symbols(params[-1]+'[0:%u][0:%u]'%(nr,nc))))
+
+    for k in sorted(op['output'].keys()):
+        retparam = '__RET_'+k.upper()
+
+        paramlist = params[:]
+        paramlist.append(retparam)
+        paramlist = ','.join(paramlist)
+        macroproto = '%s_CALC_%s(%s)'%(name,k.upper(),paramlist)
+
+        #ret.append((macroproto, ))
+        print macroproto
+
+        #if not isinstance(op['output'][k], MatrixBase):
+            #op['output'][k] = Matrix([[op['output'][k]]])
+
+        #nr,nc = op['output'][k].shape
+
+        #op['output'][k] = op['output'][k].xreplace(dict(substitutions))
+
+        #print op['output'][k]
+
+    return ret
 
 def getSnippetsCovPred(predictionjson):
     stateVector, Pn_O, subx = loadExprsFromJSON(predictionjson, ['stateVector', 'Pn_O', 'subx'])

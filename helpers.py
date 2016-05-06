@@ -134,14 +134,6 @@ def pow_to_sq(string):
     import re
     return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
 
-def loadExprsFromJSON(fname):
-    with open(fname, 'r') as f:
-        import json
-        imported = json.load(f)
-        for section,expr_dict in imported.iteritems():
-            imported[section] = dict(map(lambda x: (x[0],sympify(x[1])),imported[section].iteritems()))
-        return imported
-
 def serialize_exprs_in_structure(obj):
     if isinstance(obj, dict):
         return {k: serialize_exprs_in_structure(v) for k, v in obj.iteritems()}
@@ -149,6 +141,21 @@ def serialize_exprs_in_structure(obj):
         return [serialize_exprs_in_structure(x) for x in obj]
     else:
         return srepr(obj)
+
+def deserialize_exprs_in_structure(obj):
+    if isinstance(obj, dict):
+        return {k: deserialize_exprs_in_structure(v) for k, v in obj.iteritems()}
+    elif isinstance(obj, list):
+        return [deserialize_exprs_in_structure(x) for x in obj]
+    else:
+        return sympify(obj)
+
+def loadExprsFromJSON(fname):
+    with open(fname, 'r') as f:
+        import json
+        imported = json.load(f)
+        imported['exprs'] = deserialize_exprs_in_structure(imported['exprs'])
+        return imported
 
 def saveExprsToJSON(fname, input_dict):
     with open(fname, 'w') as f:

@@ -116,7 +116,7 @@ def deriveCovariancePrediction(jsonfile):
 
     results = [{
         'input':{'q':estQuat,'x':stateVector,'P':P,'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt,'subx':toVec([x[0] for x in subx])},
-        'output':{'P':Pn_O,'subx':subx}
+        'output':{'P':Pn_O,'subx':toVec([x[1] for x in subx])}
         }]
 
     check_results(results)
@@ -205,7 +205,7 @@ def deriveFusionSequential(fusionName,jsonfile,measPred,additionalinputs={}):
 
         results.append({
             'input':{'q':estQuat,'x':stateVector,'P':P,'R':R,'subx':toVec([x[0] for x in subx])},
-            'output':{'S':S_O,'K':K_O,'P':Pn_O,'subx':subx}
+            'output':{'S':S_O,'K':K_O,'P':Pn_O,'subx':toVec([x[1] for x in subx])}
             })
         results[-1]['input'].update(additionalinputs)
 
