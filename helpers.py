@@ -134,24 +134,30 @@ def pow_to_sq(string):
     import re
     return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
 
-def loadExprsFromJSON(fname, keys):
+def loadExprsFromJSON(fname):
     with open(fname, 'r') as f:
         import json
         imported = json.load(f)
-        ret = []
-        for k in keys:
-            ret.append(sympify(imported[k]))
-        return tuple(ret)
+        for section,expr_dict in imported.iteritems():
+            imported[section] = dict(map(lambda x: (x[0],sympify(x[1])),imported[section].iteritems()))
+        return imported
 
-def saveExprsToJSON(fname, expr_dict):
+def serialize_exprs_in_structure(obj):
+    if isinstance(obj, dict):
+        return {k: serialize_exprs_in_structure(v) for k, v in obj.iteritems()}
+    elif isinstance(obj, list):
+        return [serialize_exprs_in_structure(x) for x in obj]
+    else:
+        return srepr(obj)
+
+def saveExprsToJSON(fname, input_dict):
     with open(fname, 'w') as f:
         f.truncate()
         import json
-        save_dict = {}
-        for k,v in expr_dict.iteritems():
-            save_dict[k] = srepr(v)
+        output_dict = input_dict.copy()
+        output_dict['exprs'] = serialize_exprs_in_structure(output_dict['exprs'])
 
-        json.dump(save_dict, f)
+        json.dump(output_dict, f)
 
 def symmetricMatrixToList(M):
     assert M.rows == M.cols
@@ -160,3 +166,9 @@ def symmetricMatrixToList(M):
     r = lambda k: int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
     c = lambda k: int(k - N*r(k) + r(k)*(r(k)-1)/2 + r(k))
     return [M[r(k),c(k)] for k in range((N**2-N)/2+N)]
+
+def listSymbols(expr):
+    if hasattr(expr, "__getitem__"):
+        return set([item for sublist in map(lambda x: listSymbols(x), expr) for item in sublist])
+    else:
+        return expr.atoms(Symbol)

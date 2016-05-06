@@ -6,15 +6,11 @@ import math
 # Parameters
 dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
-gravityNED = toVec(0.,0.,symbols('gravity'))
+gravity = Symbol('gravity')
+gravityNED = toVec(0.,0.,gravity)
 dt = Symbol('dt')
 ptd = Symbol('ptd')
-R_TAS = toVec(Symbol('R_TAS'))
-R_BETA = toVec(Symbol('R_BETA'))
-R_MAG = toVec(Symbol('R_MAG'))
-R_LOS = toVec(Symbol('R_LOS'))
-R_YAW = toVec(Symbol('R_YAW'))
-R_DECL = toVec(Symbol('R_DECL'))
+R = toVec(Symbol('R[0][0]'))
 
 # Inputs
 dAngMeas = toVec(symbols('dax day daz'))
@@ -35,10 +31,9 @@ vwn, vwe = symbols('vwn vwe')
 windNED = toVec(vwn,vwe,0.)
 stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
-stateVectorIndexed = toVec(symbols('_STATE[0:%u]'%(nStates,)))
 
 # Covariance matrix
-P = Matrix(nStates,nStates,symbols('_COV[0:%u][0:%u]' % (nStates,nStates)))
+P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
 P_symmetric = P
 for r in range(P_symmetric.rows):
     for c in range(P_symmetric.cols):
@@ -112,85 +107,117 @@ def deriveCovariancePrediction(jsonfile):
     Pn_O = zero_lower_offdiagonals(Pn_O)
 
     # assume that the P matrix is symmetrical
-    Pn_O = Pn_O.xreplace(dict(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed)))
+    Pn_O = Pn_O.xreplace(dict(zip(P, P_symmetric)))
 
     Pn_O,subx = extractSubexpressions(Pn_O,'_SUBX')
 
     # make Pn_O symmetric
     Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
+    results = [{
+        'input':{'q':estQuat,'x':stateVector,'P':P,'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt,'subx':toVec([x[0] for x in subx])},
+        'output':{'P':Pn_O,'subx':subx}
+        }]
 
-    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'Pn_O':Pn_O,'subx':subx})
-    ops = count_ops(zero_lower_offdiagonals(Pn_O))+count_ops(subx)
-    print('Covariance predicton: derivation saved to %s. %u subexpressions, %u ops' % (jsonfile,len(subx),ops))
+    check_results(results)
+
+    saveExprsToJSON(jsonfile, {'exprs': results})
+    n_subx, ops = result_stats(results)
+    print('Covariance predicton: derivation saved to %s. %u subexpressions, %u ops' % (jsonfile,n_subx,ops))
+
+def derivePosFusion(jsonfile):
+    measPred = posNED
+
+    deriveFusionSequential('Pos',jsonfile,measPred)
+
+def deriveVelFusion(jsonfile):
+    measPred = velNED
+
+    deriveFusionSequential('Vel',jsonfile,measPred)
 
 def deriveAirspeedFusion(jsonfile):
-    measPred = Matrix([[sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2)]])
+    measPred = toVec(sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2))
 
-    deriveFusionSequential('Airspeed',jsonfile,measPred,R_TAS)
+    deriveFusionSequential('Airspeed',jsonfile,measPred)
 
 def deriveBetaFusion(jsonfile):
     Vbw = Tbn.T*(velNED-windNED)
-    measPred = Matrix([[Vbw[1]/Vbw[0]]])
+    measPred = toVec(Vbw[1]/Vbw[0])
 
-    deriveFusionSequential('Beta',jsonfile,measPred,R_BETA)
+    deriveFusionSequential('Beta',jsonfile,measPred)
 
 def deriveMagFusion(jsonfile):
     measPred = Tbn.T*magNED+magBody
 
-    deriveFusionSequential('Mag',jsonfile,measPred,R_MAG)
+    deriveFusionSequential('Mag',jsonfile,measPred)
 
 def deriveOptFlowFusion(jsonfile):
     velBody = Tbn.T*velNED
     rangeToGround = (ptd-posNED[2])/Tbn[2,2]
     measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
 
-    deriveFusionSequential('Flow',jsonfile,measPred,R_LOS)
+    deriveFusionSequential('Flow',jsonfile,measPred,{'ptd':ptd})
 
 def deriveYaw321Fusion(jsonfile):
     measPred = toVec(atan(Tbn[1,0]/Tbn[0,0]))
 
-    deriveFusionSequential('Yaw321',jsonfile,measPred,R_YAW)
+    deriveFusionSequential('Yaw321',jsonfile,measPred)
 
 def deriveYaw312Fusion(jsonfile):
     measPred = toVec(atan(-Tbn[0,1]/Tbn[1,1]))
 
-    deriveFusionSequential('Yaw312',jsonfile,measPred,R_YAW)
+    deriveFusionSequential('Yaw312',jsonfile,measPred)
 
 def deriveDeclinationFusion(jsonfile):
     measPred = toVec(atan(magNED[1]/magNED[0]))
 
-    deriveFusionSequential('Declination',jsonfile,measPred,R_YAW)
+    deriveFusionSequential('Declination',jsonfile,measPred)
 
-def deriveFusionSequential(fusionName,jsonfile,measPred,R):
-    assert isinstance(measPred,MatrixBase) and isinstance(R,MatrixBase) and R.shape[0] == R.shape[1] == 1
+def deriveFusionSequential(fusionName,jsonfile,measPred,additionalinputs={}):
+    assert isinstance(measPred,MatrixBase) and measPred.cols == 1
     print('Beginning %s fusion derivation' % (fusionName,))
 
-    H = measPred.jacobian(stateVector)
     nObs = measPred.rows
-    S_O = [None for _ in range(nObs)]
-    K_O = [None for _ in range(nObs)]
-    Pn_O = [None for _ in range(nObs)]
+
+    H_simul = measPred.jacobian(stateVector)
+    I = eye(nStates)
+
+    results = []
 
     for i in range(nObs):
-        S_O[i] = (H.row(i)*P*H.row(i).T + R)[0]
-        K_O[i] = (P*H.row(i).T)/S_O[i]
-        Pn_O[i] = (eye(nStates)-K_O[i]*H.row(i))*P
-        Pn_O[i] = zero_lower_offdiagonals(Pn_O[i])
+        H = H_simul.row(i)
 
-        substitute = dict(zip(P, P_symmetric)+zip(stateVector,stateVectorIndexed))
-        S_O[i] = S_O[i].xreplace(substitute)
-        K_O[i] = K_O[i].xreplace(substitute)
-        Pn_O[i] = Pn_O[i].xreplace(substitute)
+        S = (H*P*H.T + R)[0]
+        K = (P*H.T)/S
+        Pn = (I-K*H)*P #*(I-K*H).T+K*R*K.T # Joseph form for numerical reasons
 
-    result = extractSubexpressions(S_O+K_O+Pn_O,'_SUBX')
-    S_O = list(result[nObs*0:nObs*1])
-    K_O = list(result[nObs*1:nObs*2])
-    Pn_O = list(result[nObs*2:nObs*3])
-    subx = result[-1]
+        S_O = S
+        K_O = K
+        Pn_O = Pn
+        Pn_O = zero_lower_offdiagonals(Pn_O)
 
-    Pn_O = map(copy_upper_to_lower_offdiagonals, Pn_O)
+        substitute = dict(zip(P, P_symmetric))
+        S_O = S_O.xreplace(substitute)
+        K_O = K_O.xreplace(substitute)
+        Pn_O = Pn_O.xreplace(substitute)
+        S_O,K_O,Pn_O,subx = extractSubexpressions([S_O,K_O,Pn_O],'_SUBX')
+        Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
 
-    saveExprsToJSON(jsonfile, {'stateVector':stateVector,'nObs':nObs,'S_O':S_O,'K_O':K_O,'Pn_O':Pn_O,'subx':subx})
-    ops = count_ops(S_O)+count_ops(K_O)+count_ops(map(zero_lower_offdiagonals, Pn_O))+count_ops(subx)
-    print('%s fusion: derivation saved to %s. %u subexpressions, %u ops' % (fusionName,jsonfile,len(subx),ops))
+        results.append({
+            'input':{'q':estQuat,'x':stateVector,'P':P,'R':R,'subx':toVec([x[0] for x in subx])},
+            'output':{'S':S_O,'K':K_O,'P':Pn_O,'subx':subx}
+            })
+        results[-1]['input'].update(additionalinputs)
+
+    check_results(results)
+    saveExprsToJSON(jsonfile, {'exprs':results})
+    n_subx, ops = result_stats(results)
+    print('%s fusion: derivation saved to %s. %u subexpressions, %u ops' % (fusionName,jsonfile,n_subx,ops))
+
+def check_results(results):
+    for r in results:
+        straysymbols = listSymbols(r['output'].values())-listSymbols(r['input'].values())
+        assert not straysymbols, 'stray symbols: %s' % (str(straysymbols),)
+
+def result_stats(results):
+    return (max(map(lambda x: len(x['output']['subx']), results)), sum(map(lambda x: count_ops(x['output'].values()),results)))
