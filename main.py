@@ -19,8 +19,10 @@ if not os.path.exists(outdir):
     os.makedirs(outdir)
 
 predictionjson = os.path.join(outdir, 'covariancePrediction.json')
-posjson = os.path.join(outdir, 'posFusion.json')
-veljson = os.path.join(outdir, 'velFusion.json')
+posnejson = os.path.join(outdir, 'posNEFusion.json')
+posdjson = os.path.join(outdir, 'posDFusion.json')
+velnejson = os.path.join(outdir, 'velNEFusion.json')
+veldjson = os.path.join(outdir, 'velDFusion.json')
 airspeedjson = os.path.join(outdir, 'airspeedFusion.json')
 betajson = os.path.join(outdir, 'betaFusion.json')
 magjson = os.path.join(outdir, 'magFusion.json')
@@ -31,8 +33,10 @@ declinationjson = os.path.join(outdir, 'declinationFusion.json')
 c_header = os.path.join(outdir, 'ekf_defines.h')
 
 derivations = {
-    'pos': (derivePosFusion, posjson),
-    'vel': (deriveVelFusion, veljson),
+    'posne': (derivePosNEFusion, posnejson),
+    'posd': (derivePosDFusion, posdjson),
+    'velne': (deriveVelNEFusion, velnejson),
+    'veld': (deriveVelDFusion, veldjson),
     'covpred': (deriveCovariancePrediction, predictionjson),
     'airspeed': (deriveAirspeedFusion, airspeedjson),
     'beta': (deriveBetaFusion, betajson),

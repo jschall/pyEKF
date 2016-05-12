@@ -92,7 +92,7 @@ def quickinv_sym(M):
     n = M.rows
     A = Matrix(n,n,symbols('_X[0:%u][0:%u]' % (n,n)))
     A = copy_upper_to_lower_offdiagonals(A)
-    B = simplify(A.inv())
+    B = Matrix(simplify(A.inv()))
     return B.xreplace(dict(zip(A,M)))
 
 def zero_lower_offdiagonals(M):
@@ -115,6 +115,22 @@ def copy_upper_to_lower_offdiagonals(M):
         for c in range(ret.cols):
             if r > c:
                 ret[r,c] = ret[c,r]
+    return ret
+
+def average_upper_lower_offdiagonals(M):
+    assert isinstance(M,MatrixBase) and M.rows == M.cols
+
+    n = M.rows
+
+    ret = zeros(n)
+
+    for r in range(n):
+        for c in range(n):
+            if r == c:
+                ret[r,c] = M[r,c]
+            else:
+                ret[r,c] = M[r,c]*0.5+M[c,r]*0.5
+
     return ret
 
 def count_subexpression(subexpr, expr):
