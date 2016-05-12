@@ -10,7 +10,6 @@ gravity = Symbol('gravity')
 gravityNED = toVec(0.,0.,gravity)
 dt = Symbol('dt')
 ptd = Symbol('ptd')
-R = toVec(Symbol('R[0][0]'))
 
 # Inputs
 dAngMeas = toVec(symbols('dax day daz'))
@@ -34,11 +33,7 @@ nStates = len(stateVector)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
-P_symmetric = P
-for r in range(P_symmetric.rows):
-    for c in range(P_symmetric.cols):
-        if r > c:
-            P_symmetric[c,r] = P_symmetric[r,c]
+P_symmetric = copy_upper_to_lower_offdiagonals(P)
 
 # Common computations
 # Quaternion from body frame at time k to earth frame
@@ -100,30 +95,38 @@ def deriveCovariancePrediction(jsonfile):
     # Pn: covariance matrix at time k+1
     Pn = F*P*F.T + Q
 
-    # Optimizations
-    Pn_O = Pn
-
     # zero the lower off-diagonals before extracting subexpressions
-    Pn_O = zero_lower_offdiagonals(Pn_O)
+    Pn = zero_lower_offdiagonals(Pn)
 
     # assume that the P matrix is symmetrical
-    Pn_O = Pn_O.xreplace(dict(zip(P, P_symmetric)))
+    Pn = Pn.xreplace(dict(zip(P, P_symmetric)))
 
-    Pn_O,subx = extractSubexpressions(Pn_O,'_SUBX')
+    Pn,subx = extractSubexpressions(Pn,'_SUBX')
 
-    # make Pn_O symmetric
-    Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
+    # make Pn symmetric
+    Pn = copy_upper_to_lower_offdiagonals(Pn)
 
-    results = [{
-        'input':{'q':estQuat,'x':stateVector,'P':P,'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt,'subx':toVec([x[0] for x in subx])},
-        'output':{'P':Pn_O,'subx':toVec([x[1] for x in subx])}
-        }]
+    funcParams = {'quat':estQuat,'x':stateVector,'P':P_symmetric,'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt}
 
-    check_results(results)
+    funcs = {}
 
-    saveExprsToJSON(jsonfile, {'exprs': results})
-    n_subx, ops = result_stats(results)
-    print('Covariance predicton: derivation saved to %s. %u subexpressions, %u ops' % (jsonfile,n_subx,ops))
+    funcs['subx'] = {}
+    funcs['subx']['params'] = funcParams
+    funcs['subx']['ret'] = toVec([x[1] for x in subx])
+    funcs['subx']['retsymbols'] = toVec([x[0] for x in subx])
+
+    funcParams = funcParams.copy()
+    funcParams['subx'] = toVec([x[0] for x in subx])
+
+    funcs['P'] = {}
+    funcs['P']['params'] = funcParams
+    funcs['P']['ret'] = Pn
+
+    check_funcs(funcs)
+
+    saveExprsToJSON(jsonfile, {'operations':[funcs]})
+
+    print('Covariance predicton: derivation saved to %s.' % (jsonfile,))
 
 def derivePosFusion(jsonfile):
     measPred = posNED
@@ -173,51 +176,98 @@ def deriveDeclinationFusion(jsonfile):
 
     deriveFusionSequential('Declination',jsonfile,measPred)
 
+def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={}):
+    assert isinstance(measPred,MatrixBase) and measPred.cols == 1
+    print('Beginning %s fusion derivation' % (fusionName,))
+
+    nObs = measPred.rows
+    substitute = dict(zip(P, P_symmetric))
+
+    R = diag(*symbols('R[0:%u]' % (nObs,)))
+
+    H = measPred.jacobian(stateVector)
+    I = eye(nStates)
+
+    funcs = {}
+
+    S = (H*P*H.T + R)
+    K = P*H.T*quickinv_sym(S)
+    K = K.xreplace(substitute)
+    K, K_subx = extractSubexpressions([K],'subx')
+
+    Pn = (I-K*H)*P*(I-K*H).T+K*R*K.T # Joseph form for numerical reasons if desired
+
+    Pn = zero_lower_offdiagonals(Pn)
+    Pn = Pn.xreplace(substitute)
+
+    Pn, P_subx = extractSubexpressions([Pn],'subx')
+
+    ops = [count_ops(K), count_ops(K_subx), count_ops(Pn), count_ops(P_subx)]
+
+
+
 def deriveFusionSequential(fusionName,jsonfile,measPred,additionalinputs={}):
     assert isinstance(measPred,MatrixBase) and measPred.cols == 1
     print('Beginning %s fusion derivation' % (fusionName,))
+    R = toVec(Symbol('R'))
 
     nObs = measPred.rows
 
     H_simul = measPred.jacobian(stateVector)
     I = eye(nStates)
 
-    results = []
+    operations = []
 
     for i in range(nObs):
+        funcs = {}
+
         H = H_simul.row(i)
 
         S = (H*P*H.T + R)[0]
         K = (P*H.T)/S
-        Pn = (I-K*H)*P #*(I-K*H).T+K*R*K.T # Joseph form for numerical reasons
-
-        S_O = S
-        K_O = K
-        Pn_O = Pn
-        Pn_O = zero_lower_offdiagonals(Pn_O)
+        Pn = (I-K*H)*P #*(I-K*H).T+K*R*K.T # Joseph form for numerical reasons if desired
 
         substitute = dict(zip(P, P_symmetric))
-        S_O = S_O.xreplace(substitute)
-        K_O = K_O.xreplace(substitute)
-        Pn_O = Pn_O.xreplace(substitute)
-        S_O,K_O,Pn_O,subx = extractSubexpressions([S_O,K_O,Pn_O],'_SUBX')
-        Pn_O = copy_upper_to_lower_offdiagonals(Pn_O)
+        S = S.xreplace(substitute)
+        K = K.xreplace(substitute)
+        Pn = zero_lower_offdiagonals(Pn)
+        Pn = Pn.xreplace(substitute)
 
-        results.append({
-            'input':{'q':estQuat,'x':stateVector,'P':P,'R':R,'subx':toVec([x[0] for x in subx])},
-            'output':{'S':S_O,'K':K_O,'P':Pn_O,'subx':toVec([x[1] for x in subx])}
-            })
-        results[-1]['input'].update(additionalinputs)
+        S, K, Pn, subx = extractSubexpressions([S,K,Pn],'subx')
 
-    check_results(results)
-    saveExprsToJSON(jsonfile, {'exprs':results})
-    n_subx, ops = result_stats(results)
-    print('%s fusion: derivation saved to %s. %u subexpressions, %u ops' % (fusionName,jsonfile,n_subx,ops))
+        ops = [count_ops(S), count_ops(K), count_ops(Pn), count_ops(subx)]
+        print ops, sum(ops), len(subx)
 
-def check_results(results):
-    for r in results:
-        straysymbols = listSymbols(r['output'].values())-listSymbols(r['input'].values())
-        assert not straysymbols, 'stray symbols: %s' % (str(straysymbols),)
+        Pn = copy_upper_to_lower_offdiagonals(Pn)
 
-def result_stats(results):
-    return (max(map(lambda x: len(x['output']['subx']), results)), sum(map(lambda x: count_ops(x['output'].values()),results)))
+        funcParams = {'quat':estQuat,'x':stateVector,'P':P_symmetric,'R':R}
+        funcParams.update(additionalinputs)
+
+
+        funcs['subx'] = {}
+        funcs['subx']['params'] = funcParams
+        funcs['subx']['ret'] = toVec([x[1] for x in subx])
+        funcs['subx']['retsymbols'] = toVec([x[0] for x in subx])
+
+        funcParams = funcParams.copy()
+        funcParams['subx'] = toVec([x[0] for x in subx])
+
+        funcs['S'] = {}
+        funcs['S']['params'] = funcParams
+        funcs['S']['ret'] = S
+
+        funcs['K'] = {}
+        funcs['K']['params'] = funcParams
+        funcs['K']['ret'] = K
+
+        funcs['P'] = {}
+        funcs['P']['params'] = funcParams
+        funcs['P']['ret'] = Pn
+        operations.append(funcs)
+
+    for funcs in operations:
+        check_funcs(funcs)
+
+    saveExprsToJSON(jsonfile, {'operations':operations})
+
+    print('%s fusion: derivation saved to %s.' % (fusionName,jsonfile))

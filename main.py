@@ -3,6 +3,9 @@ from codegen import *
 import os
 import argparse
 from multiprocessing import Process
+import datetime
+
+print 'Begin %s' % (datetime.datetime.now().time().isoformat(),)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--outputdir', nargs=1, dest='outdir', default=['output'])
@@ -30,7 +33,7 @@ c_header = os.path.join(outdir, 'ekf_defines.h')
 derivations = {
     'pos': (derivePosFusion, posjson),
     'vel': (deriveVelFusion, veljson),
-    'prediction': (deriveCovariancePrediction, predictionjson),
+    'covpred': (deriveCovariancePrediction, predictionjson),
     'airspeed': (deriveAirspeedFusion, airspeedjson),
     'beta': (deriveBetaFusion, betajson),
     'mag': (deriveMagFusion, magjson),
@@ -59,3 +62,5 @@ if args.codegen:
         jsondict[key] = val[1]
 
     generateCode(jsondict,c_header)
+
+print 'End %s' % (datetime.datetime.now().time().isoformat(),)

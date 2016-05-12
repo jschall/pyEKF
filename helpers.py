@@ -87,23 +87,35 @@ def rot_vec_to_matrix(_v):
     axis = v/theta
     return eye(3)*cos(theta)+(1-cos(theta))*axis*axis.T+skew(axis)*sin(theta)
 
+def quickinv_sym(M):
+    assert isinstance(M,MatrixBase) and M.rows == M.cols
+    n = M.rows
+    A = Matrix(n,n,symbols('_X[0:%u][0:%u]' % (n,n)))
+    A = copy_upper_to_lower_offdiagonals(A)
+    B = simplify(A.inv())
+    return B.xreplace(dict(zip(A,M)))
+
 def zero_lower_offdiagonals(M):
     assert isinstance(M,MatrixBase) and M.rows == M.cols
 
-    for r in range(M.rows):
-        for c in range(M.cols):
+    ret = M[:,:]
+
+    for r in range(ret.rows):
+        for c in range(ret.cols):
             if r > c:
-                M[r,c] = 0.
-    return M
+                ret[r,c] = 0.
+    return ret
 
 def copy_upper_to_lower_offdiagonals(M):
     assert isinstance(M,MatrixBase) and M.rows == M.cols
 
-    for r in range(M.rows):
-        for c in range(M.cols):
+    ret = M[:,:]
+
+    for r in range(ret.rows):
+        for c in range(ret.cols):
             if r > c:
-                M[r,c] = M[c,r]
-    return M
+                ret[r,c] = ret[c,r]
+    return ret
 
 def count_subexpression(subexpr, expr):
     if hasattr(expr, "__getitem__"):
@@ -127,6 +139,8 @@ def extractSubexpressions(inexprs, prefix='X',threshold=10):
         subexprs[i] = (newSym,subexprs[i][1])
         subexprs = map(lambda x: (x[0],x[1].xreplace(sub)), subexprs)
         outexprs = map(lambda x: x.xreplace(sub), outexprs)
+
+    outexprs = map(lambda x: Matrix(x) if type(x) is ImmutableDenseMatrix else x, outexprs)
 
     return tuple(outexprs+[subexprs])
 
@@ -154,7 +168,7 @@ def loadExprsFromJSON(fname):
     with open(fname, 'r') as f:
         import json
         imported = json.load(f)
-        imported['exprs'] = deserialize_exprs_in_structure(imported['exprs'])
+        imported['operations'] = deserialize_exprs_in_structure(imported['operations'])
         return imported
 
 def saveExprsToJSON(fname, input_dict):
@@ -162,20 +176,29 @@ def saveExprsToJSON(fname, input_dict):
         f.truncate()
         import json
         output_dict = input_dict.copy()
-        output_dict['exprs'] = serialize_exprs_in_structure(output_dict['exprs'])
+        output_dict['operations'] = serialize_exprs_in_structure(output_dict['operations'])
 
         json.dump(output_dict, f)
 
-def symmetricMatrixToList(M):
+def symmetricMatrixToVec(M):
     assert M.rows == M.cols
 
     N = M.rows
     r = lambda k: int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
     c = lambda k: int(k - N*r(k) + r(k)*(r(k)-1)/2 + r(k))
-    return [M[r(k),c(k)] for k in range((N**2-N)/2+N)]
+    return toVec([M[r(k),c(k)] for k in range((N**2-N)/2+N)])
 
 def listSymbols(expr):
     if hasattr(expr, "__getitem__"):
         return set([item for sublist in map(lambda x: listSymbols(x), expr) for item in sublist])
     else:
         return expr.atoms(Symbol)
+
+def check_funcs(funcs):
+    for v in funcs.values():
+        insymbols = listSymbols(v['params'].values())
+        if 'retsymbols' in v:
+            insymbols = insymbols.union(listSymbols(v['retsymbols']))
+        funcsymbols = listSymbols(v['ret'])
+        straysymbols = funcsymbols-insymbols
+        assert not straysymbols, 'stray symbols: %s' % (str(straysymbols),)

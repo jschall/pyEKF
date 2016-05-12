@@ -20,17 +20,17 @@ def generateCode(jsondict, cfile):
     # extract filter operations
     filterOps = {}
     for n,fn in jsondict.iteritems():
-        exprs = loadExprsFromJSON(fn)['exprs']
-        if len(exprs) > 1:
-            for i in range(len(exprs)):
-                filterOps['%s%s' % (n.upper(),i)] = exprs[i]
+        operations = loadExprsFromJSON(fn)['operations']
+        if len(operations) > 1:
+            for i in range(len(operations)):
+                filterOps['%s%s' % (n.upper(),i)] = operations[i]
         else:
-            filterOps['%s' % (n.upper(),)] = exprs[0]
+            filterOps['%s' % (n.upper(),)] = operations[0]
 
     hashdefines = []
     hashdefines.extend(getConstants(filterOps))
-    for k,v in filterOps.iteritems():
-        hashdefines.extend(getSnippets(k,v))
+    for k in sorted(filterOps.keys()):
+        hashdefines.extend(getSnippetDefines(k,filterOps[k]))
 
     with open(cfile, 'w') as f:
         f.truncate()
@@ -40,117 +40,97 @@ def generateCode(jsondict, cfile):
 def getConstants(filterOps):
     max_num_subx = 0
     for k,v in filterOps.iteritems():
-        max_num_subx = max(len(v['output']['subx']),max_num_subx)
+        max_num_subx = max(len(v['subx']['ret']),max_num_subx)
 
-    x = filterOps['PREDICTION']['input']['x']
-    u = filterOps['PREDICTION']['input']['u']
+    x = filterOps['COVPRED']['P']['params']['x']
+    u = filterOps['COVPRED']['P']['params']['u']
     ret = []
     ret.append(('NUM_STATES', x.rows))
     ret.append(('NUM_CONTROL_INPUTS', u.rows))
     ret.append(('MAX_NUM_SUBX', max_num_subx))
     for r in range(x.rows):
-        ret.append(('X_IDX_'+str(x[r,0]).upper(), r))
+        ret.append(('STATE_IDX_'+str(x[r,0]).upper(), r))
     for r in range(u.rows):
         ret.append(('U_IDX_'+str(u[r,0]).upper(), r))
     return ret
 
-def getSnippets(name, op):
+def getSnippetDefines(opname, funcs):
     ret = []
 
-    params = []
-    substitutions = []
-    for k in sorted(op['input'].keys()):
-        if not isinstance(op['input'][k], MatrixBase):
-            op['input'][k] = Matrix([[op['input'][k]]])
+    for retName,func in funcs.iteritems():
+        retParamName = '__RET_'+retName.upper()
 
-        nr,nc = op['input'][k].shape
+        paramlist = []
+        substitutions = []
+        for paramname in sorted(func['params'].keys()):
+            if not isinstance(func['params'][paramname], MatrixBase):
+                func['params'][paramname] = Matrix([[func['params'][paramname]]])
 
-        params.append('__'+k.upper())
+            if func['params'][paramname].shape != (1,1) and func['params'][paramname].is_symmetric(simplify=False):
+                func['params'][paramname] = symmetricMatrixToVec(func['params'][paramname])
 
-        if (nr,nc) == (1,1):
-            substitutions += zip(op['input'][k],Matrix(nr,nc,[Symbol(params[-1])]))
-        elif nc == 1:
-            substitutions += zip(op['input'][k],Matrix(nr,nc,symbols(params[-1]+'[0:%u]'%(nr,))))
-        else:
-            substitutions += zip(op['input'][k],Matrix(nr,nc,symbols(params[-1]+'[0:%u][0:%u]'%(nr,nc))))
+            nr,nc = func['params'][paramname].shape
 
-    for k in sorted(op['output'].keys()):
-        retparam = '__RET_'+k.upper()
+            paramlist.append('__'+paramname.upper())
 
-        paramlist = params[:]
-        paramlist.append(retparam)
-        paramlist = ','.join(paramlist)
-        macroproto = '%s_CALC_%s(%s)'%(name,k.upper(),paramlist)
+            if (nr,nc) == (1,1):
+                substitutions += zip(func['params'][paramname], Matrix(nr,nc, [Symbol(paramlist[-1])]))
+            elif nc == 1:
+                substitutions += zip(func['params'][paramname], Matrix(nr,nc, symbols(paramlist[-1]+'[0:%u]'%(nr,))))
+            else:
+                substitutions += zip(func['params'][paramname], Matrix(nr,nc, symbols(paramlist[-1]+'[0:%u][0:%u]'%(nr,nc))))
 
-        #ret.append((macroproto, ))
-        print macroproto
+        if 'retsymbols' in func:
+            if not isinstance(func['retsymbols'], MatrixBase):
+                func['retsymbols'] = Matrix([[func['retsymbols']]])
 
-        #if not isinstance(op['output'][k], MatrixBase):
-            #op['output'][k] = Matrix([[op['output'][k]]])
+            nr,nc = func['retsymbols'].shape
 
-        #nr,nc = op['output'][k].shape
+            if (nr,nc) == (1,1):
+                substitutions += zip(func['retsymbols'], Matrix(nr,nc, [Symbol(retParamName)]))
+            elif nc == 1:
+                substitutions += zip(func['retsymbols'], Matrix(nr,nc, symbols(retParamName+'[0:%u]'%(nr,))))
+            else:
+                substitutions += zip(func['retsymbols'], Matrix(nr,nc, symbols(retParamName+'[0:%u][0:%u]'%(nr,nc))))
 
-        #op['output'][k] = op['output'][k].xreplace(dict(substitutions))
+        func['ret'] = func['ret'].xreplace(dict(substitutions))
 
-        #print op['output'][k]
+        defineName = '%s_CALC_%s(%s)' % (opname,retName.upper(),','.join(paramlist+[retParamName]))
+        ret.append((defineName,getSnippet(retParamName,func['ret'])))
 
     return ret
 
-def getSnippetsCovPred(predictionjson):
-    stateVector, Pn_O, subx = loadExprsFromJSON(predictionjson, ['stateVector', 'Pn_O', 'subx'])
-    Pn_O = symmetricMatrixToList(Pn_O)
+def getSnippet(retParamName, outputMatrix):
+    if not isinstance(outputMatrix, MatrixBase):
+        outputMatrix = Matrix([[outputMatrix]])
 
-    ret = []
+    if outputMatrix.is_symmetric(simplify=False):
+        outputMatrix = symmetricMatrixToVec(outputMatrix)
 
-    snippet = ''
-    for e in subx:
-        snippet += ccode(e[1], assign_to=e[0])+' '
-    snippet = '{ '+snippet+' }'
+    nr,nc = outputMatrix.shape
 
-    ret.append(('COV_PRED_CALC_SUBX(_STATE, _COV, _SUBX)', snippet))
+    if (nr,nc) == (1,1):
+        retMatrix = Matrix(nr,nc, [Symbol(retParamName)])
+    elif nc == 1:
+        retMatrix = Matrix(nr,nc, symbols(retParamName+'[0:%u]'%(nr,)))
+    else:
+        retMatrix = Matrix(nr,nc, symbols(retParamName+'[0:%u][0:%u]'%(nr,nc)))
 
-    snippet = ''
-    for i in range(len(Pn_O)):
-        snippet += ccode(Pn_O[i], assign_to='_NEXTCOV[%u]'%(i,))+' '
-    snippet = '{ '+snippet+' }'
+    ret = ''
+    for assignee,expr in zip(retMatrix,outputMatrix):
+        ret += ccode(expr, assign_to=assignee)+' '
 
-    ret.append(('COV_PRED_CALC_NEXTCOV(_STATE, _COV, _SUBX, _NEXTCOV)', snippet))
-
-    return ret
-
-def getFusionSnippets(json,name):
-    name = name.upper()
-    nObs, S_O, K_O, Pn_O, subx = loadExprsFromJSON(json, ['nObs', 'S_O', 'K_O', 'Pn_O', 'subx'])
-    Pn_O = map(symmetricMatrixToList,Pn_O)
-
-    ret = []
-
-    for obs in range(nObs):
-        obsname = '%s%u' % (name,obs) if nObs > 1 else name
-
-        snippet = ''
-        for e in subx[obs]:
-            snippet += ccode(e[1], assign_to=e[0])+' '
-        ret.append(('%s_CALC_SUBX(_STATE, _COV, _SUBX)' % (obsname,), '{ '+snippet+' }'))
-
-        snippet = ccode(S_O[obs], assign_to='_S')+' '
-        ret.append(('%s_CALC_S(_STATE, _COV, _SUBX, _S)' % (obsname,), '{ '+snippet+' }'))
-
-        snippet = ''
-        for i in range(len(K_O[obs])):
-            snippet += ccode(K_O[obs][i], assign_to='_K[%u]'%(i,))+' '
-        ret.append(('%s_CALC_K(_STATE, _COV, _SUBX, _K)' % (obsname,), '{ '+snippet+' }'))
-
-        snippet = ''
-        for i in range(len(Pn_O[obs])):
-            snippet += ccode(Pn_O[obs][i], assign_to='_NEXTCOV[%u]'%(i,))+' '
-        ret.append(('%s_CALC_NEXTCOV(_STATE, _COV, _SUBX, _NEXTCOV)' % (obsname,), '{ '+snippet+' }'))
-
-    return ret
+    return str(ret)
 
 def wrapstring(string, linemax, delim):
-    import re
-    return re.sub("(.{1,%u})\s(?!$)" % (linemax,), '\g<1>'+delim, string)
+    strings = string.split(' ')
+    lines = [strings[0]]
+    for s in strings[1:]:
+        if len(lines[-1]) != 0 and len(lines[-1])+len(s) > linemax:
+            lines.append(s)
+        else:
+            lines[-1] += ' '+s
+    return delim.join(lines)
 
 def getHeader(hashdefines, prefix=''):
     ret = '/*\n'
@@ -159,7 +139,7 @@ def getHeader(hashdefines, prefix=''):
             ret += prefix+key+'\n'
     ret += '*/\n\n'
     for (key,val) in hashdefines:
-        val = wrapstring(str(val),120,' \\\n')
+        val = wrapstring(str(val),100,' \\\n')
         if '\n' in val:
             ret += '\n#define %s%s \\\n%s\n' % (prefix,key,val)
         else:
