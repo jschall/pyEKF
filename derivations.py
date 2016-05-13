@@ -7,7 +7,7 @@ import math
 dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
 dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
 gravity = Symbol('gravity')
-gravityNED = toVec(0.,0.,gravity)
+gravityNED = toVec(0,0,gravity)
 dt = Symbol('dt')
 ptd = Symbol('ptd')
 
@@ -23,17 +23,17 @@ velNED = toVec(vn,ve,vd)
 posNED = toVec(symbols('pn pe pd'))
 dAngBias = toVec(symbols('dax_b day_b daz_b'))
 dAngScale = toVec(symbols('dax_s day_s daz_s'))
-dVelBias = toVec(0.,0.,symbols('dvz_b'))
+dVelBias = toVec(0,0,symbols('dvz_b'))
 magBody = toVec(symbols('magx magy magz'))
 magNED = toVec(symbols('magn mage magd'))
 vwn, vwe = symbols('vwn vwe')
-windNED = toVec(vwn,vwe,0.)
+windNED = toVec(vwn,vwe,0)
 stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
 nStates = len(stateVector)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
-P_symmetric = copy_upper_to_lower_offdiagonals(P)
+P = copy_upper_to_lower_offdiagonals(P)
 
 # Common computations
 # Quaternion from body frame at time k to earth frame
@@ -43,6 +43,7 @@ Tbn = quat_to_matrix(truthQuat)
 
 def deriveCovariancePrediction(jsonfile):
     print('Beginning covariance prediction derivation')
+    t1 = datetime.datetime.now()
 
     # The prediction step predicts the state at time k+1 as a function of the
     # state at time k and the control inputs. This attitude estimation EKF is
@@ -95,19 +96,12 @@ def deriveCovariancePrediction(jsonfile):
     # P_n: covariance matrix at time k+1
     P_n = F*P*F.T + Q
 
-    # zero the lower off-diagonals before extracting subexpressions
-    P_n = zero_lower_offdiagonals(P_n)
+    # Optimizations
+    P_n = upperTriangularToVec(P_n)
+    P_n,subx = extractSubexpressions(P_n,'subx',threshold=10)
 
-    # assume that the P matrix is symmetrical
-    P_n = P_n.xreplace(dict(zip(P, P_symmetric)))
-
-    P_n,subx = extractSubexpressions(P_n,'_SUBX')
-    op_count = count_ops(P_n)+count_ops(subx)
-
-    # make P_n symmetric
-    P_n = copy_upper_to_lower_offdiagonals(P_n)
-
-    funcParams = {'quat':estQuat,'x':stateVector,'P':P_symmetric,'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt}
+    # Output generation
+    funcParams = {'quat':estQuat,'x':stateVector,'P':upperTriangularToVec(P),'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt}
 
     funcs = {}
 
@@ -119,84 +113,95 @@ def deriveCovariancePrediction(jsonfile):
     funcParams = funcParams.copy()
     funcParams['subx'] = toVec([x[0] for x in subx])
 
-    funcs['P'] = {}
-    funcs['P']['params'] = funcParams
-    funcs['P']['ret'] = P_n
+    funcs['cov'] = {}
+    funcs['cov']['params'] = funcParams
+    funcs['cov']['ret'] = P_n
 
     check_funcs(funcs)
 
-    saveExprsToJSON(jsonfile, {'operations':[funcs]})
+    saveExprsToJSON(jsonfile, {'funcs':funcs})
 
-    print('Covariance predicton: derivation saved to %s. %u ops, %u subexpressions.' % (jsonfile,op_count,len(subx)))
+    op_count, subx_count = getOpStats(funcs)
+    t2 = datetime.datetime.now()
+    print('%s Covariance predicton: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,jsonfile,op_count,subx_count))
 
 def derivePosNEFusion(jsonfile):
     measPred = posNED[0:2,:]
 
-    deriveFusionSimultaneous('PosNE',jsonfile,measPred)
+    deriveFusionSimultaneous('posNE',jsonfile,measPred)
 
 def derivePosDFusion(jsonfile):
     measPred = posNED[2:3,:]
 
-    deriveFusionSimultaneous('PosD',jsonfile,measPred)
+    deriveFusionSimultaneous('posD',jsonfile,measPred)
 
 def deriveVelNEFusion(jsonfile):
     measPred = velNED[0:2,:]
 
-    deriveFusionSimultaneous('VelNE',jsonfile,measPred)
+    deriveFusionSimultaneous('velNE',jsonfile,measPred)
 
 def deriveVelDFusion(jsonfile):
     measPred = velNED[2:3,:]
 
-    deriveFusionSimultaneous('VelD',jsonfile,measPred)
+    deriveFusionSimultaneous('velD',jsonfile,measPred)
 
 def deriveAirspeedFusion(jsonfile):
     measPred = toVec(sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2))
 
-    deriveFusionSimultaneous('Airspeed',jsonfile,measPred)
+    deriveFusionSimultaneous('airspeed',jsonfile,measPred)
 
 def deriveBetaFusion(jsonfile):
     Vbw = Tbn.T*(velNED-windNED)
     measPred = toVec(Vbw[1]/Vbw[0])
 
-    deriveFusionSimultaneous('Beta',jsonfile,measPred,{'quat':estQuat})
+    deriveFusionSimultaneous('beta',jsonfile,measPred,{'quat':estQuat})
 
 def deriveMagFusion(jsonfile):
     measPred = Tbn.T*magNED+magBody
 
-    deriveFusionSimultaneous('Mag',jsonfile,measPred,{'quat':estQuat})
+    deriveFusionSimultaneous('mag',jsonfile,measPred,{'quat':estQuat})
 
 def deriveOptFlowFusion(jsonfile):
     velBody = Tbn.T*velNED
     rangeToGround = (ptd-posNED[2])/Tbn[2,2]
     measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
 
-    deriveFusionSimultaneous('Flow',jsonfile,measPred,{'ptd':ptd,'quat':estQuat})
+    deriveFusionSimultaneous('flow',jsonfile,measPred,{'ptd':ptd,'quat':estQuat})
 
 def deriveYaw321Fusion(jsonfile):
     measPred = toVec(atan(Tbn[1,0]/Tbn[0,0]))
 
-    deriveFusionSimultaneous('Yaw321',jsonfile,measPred,{'quat':estQuat})
+    deriveFusionSimultaneous('yaw321',jsonfile,measPred,{'quat':estQuat})
 
 def deriveYaw312Fusion(jsonfile):
     measPred = toVec(atan(-Tbn[0,1]/Tbn[1,1]))
 
-    deriveFusionSimultaneous('Yaw312',jsonfile,measPred,{'quat':estQuat})
+    deriveFusionSimultaneous('yaw312',jsonfile,measPred,{'quat':estQuat})
 
 def deriveDeclinationFusion(jsonfile):
     measPred = toVec(atan(magNED[1]/magNED[0]))
 
-    deriveFusionSimultaneous('Declination',jsonfile,measPred)
+    deriveFusionSimultaneous('declination',jsonfile,measPred)
 
-def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={}):
+def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={},R_type='scalar'):
     assert isinstance(measPred,MatrixBase) and measPred.cols == 1
     print('Beginning %s fusion derivation' % (fusionName,))
+    t1 = datetime.datetime.now()
 
     nObs = measPred.rows
     I = eye(nStates)
 
     # Define symbols
     z = toVec(symbols('z[0:%u]' % (nObs,))) # Measurement
-    R = diag(*symbols('R[0:%u]' % (nObs,))) # Measurement covariance
+    if R_type == 'matrix':
+        R_param = Matrix(nObs,nObs, symbols('R[0:%u][0:%u]' % (nObs,nObs)))
+        R = R_param
+    elif R_type == 'vector':
+        R_param = toVec(symbols('R[0:%u]' % (nObs,)))
+        R = diag(*R_param)
+    elif R_type == 'scalar':
+        R_param = Symbol('R')
+        R = eye(nObs)*R_param
 
     # Intermediates
     y = z-measPred                       # Innovation
@@ -205,34 +210,23 @@ def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={}):
     S_I = quickinv_sym(S)                # Innovation covariance inverse
     K = P*H.T*S_I                        # Near-optimal Kalman gain
 
+    y,H,S_I,K,temp_subx = extractSubexpressions([y,H,S_I,K],'temp')
+
     # Outputs
+
+    # NOTE: The covariance update involves subtraction and can result in loss
+    # of symmetry and positive definiteness due to rounding errors. Joseph's
+    # form covariance update avoids this at the expense of computation burden.
+
     NIS = y.T*S_I*y                      # Normalized innovation squared
     x_n = stateVector+K*y                # Updated state vector
-    P_n = (I-K*H)*P                      # Updated covariance matrix
-
-    # The covariance update involves subtraction and can result in loss
-    # of symmetry and positive definiteness due to rounding errors. Joseph's
-    # form covariance update avoids this at the expense of computation burden:
-    # Source: Understanding and Applying Kalman Filtering, Lindsay Kleeman
-    P_n = P_n*(I-K*H).T+K*R*K.T
-
-    # Alternative (faster, less robust) approach is to average the upper and
-    # lower offdiagonals:
-    # P_n = average_upper_lower_offdiagonals(P_n)
+    P_n = (I-K*H)*P*(I-K*H).T+K*R*K.T    # Updated covariance matrix
 
     # Optimizations
-    P_n = zero_lower_offdiagonals(P_n)
+    P_n = upperTriangularToVec(P_n)
+    y, NIS, x_n, P_n, subx = extractSubexpressions([y,NIS,x_n,P_n],'subx',threshold=10,prev_subx=temp_subx)
 
-    NIS = NIS.xreplace(dict(zip(P, P_symmetric)))
-    x_n = x_n.xreplace(dict(zip(P, P_symmetric)))
-    P_n = P_n.xreplace(dict(zip(P, P_symmetric)))
-
-    NIS, x_n, P_n, subx = extractSubexpressions([NIS,x_n,P_n],'subx')
-    op_count = count_ops(NIS)+count_ops(x_n)+count_ops(P_n)+count_ops(subx)
-
-    P_n = copy_upper_to_lower_offdiagonals(P_n)
-
-    funcParams = {'x':stateVector,'P':P_symmetric,'R':R,'z':z}
+    funcParams = {'x':stateVector,'P':upperTriangularToVec(P),'R':R_param,'z':z}
     funcParams.update(additionalinputs)
 
     funcs = {}
@@ -244,18 +238,29 @@ def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={}):
     funcParams = funcParams.copy()
     funcParams['subx'] = toVec([x[0] for x in subx])
 
+    funcs['innov'] = {}
+    funcs['innov']['params'] = funcParams
+    funcs['innov']['ret'] = y
+
     funcs['NIS'] = {}
     funcs['NIS']['params'] = funcParams
     funcs['NIS']['ret'] = NIS
 
-    funcs['x'] = {}
-    funcs['x']['params'] = funcParams
-    funcs['x']['ret'] = x_n
+    funcs['state'] = {}
+    funcs['state']['params'] = funcParams
+    funcs['state']['ret'] = x_n
 
-    funcs['P'] = {}
-    funcs['P']['params'] = funcParams
-    funcs['P']['ret'] = P_n
+    funcs['cov'] = {}
+    funcs['cov']['params'] = funcParams
+    funcs['cov']['ret'] = P_n
 
-    saveExprsToJSON(jsonfile, {'operations':[funcs]})
+    saveExprsToJSON(jsonfile, {'funcs':funcs})
 
-    print('%s fusion: derivation saved to %s. %u ops, %u subexpressions.' % (fusionName,jsonfile,op_count,len(subx)))
+    op_count, subx_count = getOpStats(funcs)
+    t2 = datetime.datetime.now()
+    print('%s %s fusion: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,fusionName,jsonfile,op_count,subx_count))
+
+def getOpStats(funcs):
+    op_count = sum([count_ops(x['ret']) for x in funcs.values()])
+    subx_count = len(funcs['subx']['ret']) if 'subx' in funcs else 0
+    return op_count, subx_count

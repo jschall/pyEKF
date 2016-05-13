@@ -1,11 +1,22 @@
+#!/usr/bin/python
 from derivations import *
 from codegen import *
 import os
+import sys
+import signal
 import argparse
 from multiprocessing import Process
 import datetime
 
-print 'Begin %s' % (datetime.datetime.now().time().isoformat(),)
+workers = []
+def sigint_handler(sig, frame):
+    for p in workers:
+        if p.is_alive():
+            p.terminate()
+    print 'Terminated by Ctrl-C'
+    exit(0)
+
+signal.signal(signal.SIGINT,sigint_handler)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--outputdir', nargs=1, dest='outdir', default=['output'])
@@ -52,7 +63,6 @@ assert set(args.derive).issubset(set(derivations.keys()+['all']))
 if 'all' in args.derive:
     args.derive = derivations.keys()
 
-workers = []
 for k in args.derive:
     workers.append(Process(target=derivations[k][0], args=(derivations[k][1],)))
     workers[-1].start()
@@ -66,5 +76,3 @@ if args.codegen:
         jsondict[key] = val[1]
 
     generateCode(jsondict,c_header)
-
-print 'End %s' % (datetime.datetime.now().time().isoformat(),)

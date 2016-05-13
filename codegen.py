@@ -3,29 +3,55 @@ from sympy.printing.ccode import *
 from helpers import *
 import math
 
-# - max subexpression array size
-# - state array size
-# - state index enum
-# - covariance prediction
-# - mag x,y,z innovation variance, kalman gain or state update, covariance update
-# - vel x,y,z innovation variance, kalman gain or state update, covariance update
-# - pos x,y,z innovation variance, kalman gain or state update, covariance update
-# - airspeed innovation variance, kalman gain or state update, covariance update
-# - beta innovation variance, kalman gain or state update, covariance update
-# - yaw312 innovation variance, kalman gain or state update, covariance update
-# - yaw321 innovation variance, kalman gain or state update, covariance update
-# - declination innovation variance, kalman gain or state update, covariance update
+class MyPrinter(CCodePrinter):
+    def __init__(self,settings={}):
+        CCodePrinter.__init__(self, settings)
+        self.known_functions = {
+            "Abs": [(lambda x: not x.is_integer, "fabsf")],
+            "gamma": "tgammaf",
+            "sin": "sinf",
+            "cos": "cosf",
+            "tan": "tanf",
+            "asin": "asinf",
+            "acos": "acosf",
+            "atan": "atanf",
+            "atan2": "atan2f",
+            "exp": "expf",
+            "log": "logf",
+            "erf": "erff",
+            "sinh": "sinhf",
+            "cosh": "coshf",
+            "tanh": "tanhf",
+            "asinh": "asinhf",
+            "acosh": "acoshf",
+            "atanh": "atanhf",
+            "floor": "floorf",
+            "ceiling": "ceilf",
+        }
+
+    def _print_Pow(self, expr):
+        if "Pow" in self.known_functions:
+            return self._print_Function(expr)
+        PREC = precedence(expr)
+
+        if expr.exp == -1:
+            return '1.0/%s' % (self.parenthesize(expr.base, PREC))
+        elif expr.exp < 0:
+            expr = 1/expr
+
+        if expr.exp == 0.5:
+            return 'sqrtf(%s)' % self._print(expr.base)
+        elif expr.exp.is_integer and expr.exp <= 4:
+            return '*'.join([self._print(expr.base) for _ in range(expr.exp)])
+        else:
+            return 'powf(%s, %s)' % (self._print(expr.base),
+                                 self._print(expr.exp))
 
 def generateCode(jsondict, cfile):
     # extract filter operations
     filterOps = {}
     for n,fn in jsondict.iteritems():
-        operations = loadExprsFromJSON(fn)['operations']
-        if len(operations) > 1:
-            for i in range(len(operations)):
-                filterOps['%s%s' % (n.upper(),i)] = operations[i]
-        else:
-            filterOps['%s' % (n.upper(),)] = operations[0]
+        filterOps[n.upper()] = loadExprsFromJSON(fn)['funcs']
 
     hashdefines = []
     hashdefines.extend(getConstants(filterOps))
@@ -42,8 +68,8 @@ def getConstants(filterOps):
     for k,v in filterOps.iteritems():
         max_num_subx = max(len(v['subx']['ret']),max_num_subx)
 
-    x = filterOps['COVPRED']['P']['params']['x']
-    u = filterOps['COVPRED']['P']['params']['u']
+    x = filterOps['COVPRED']['cov']['params']['x']
+    u = filterOps['COVPRED']['cov']['params']['u']
     ret = []
     ret.append(('NUM_STATES', x.rows))
     ret.append(('NUM_CONTROL_INPUTS', u.rows))
@@ -65,9 +91,6 @@ def getSnippetDefines(opname, funcs):
         for paramname in sorted(func['params'].keys()):
             if not isinstance(func['params'][paramname], MatrixBase):
                 func['params'][paramname] = Matrix([[func['params'][paramname]]])
-
-            if func['params'][paramname].shape != (1,1) and func['params'][paramname].is_symmetric(simplify=False):
-                func['params'][paramname] = symmetricMatrixToVec(func['params'][paramname])
 
             nr,nc = func['params'][paramname].shape
 
@@ -104,8 +127,7 @@ def getSnippet(retParamName, outputMatrix):
     if not isinstance(outputMatrix, MatrixBase):
         outputMatrix = Matrix([[outputMatrix]])
 
-    if outputMatrix.is_symmetric(simplify=False):
-        outputMatrix = symmetricMatrixToVec(outputMatrix)
+    outputMatrix = outputMatrix
 
     nr,nc = outputMatrix.shape
 
@@ -118,9 +140,15 @@ def getSnippet(retParamName, outputMatrix):
 
     ret = ''
     for assignee,expr in zip(retMatrix,outputMatrix):
-        ret += ccode(expr, assign_to=assignee)+' '
+        ret += double2float(MyPrinter().doprint(expr, assignee))+' '
 
     return str(ret)
+
+def double2float(string):
+    import re
+    string = re.sub(r"[0-9]+\.[0-9]+", '\g<0>f', string)
+
+    return string
 
 def wrapstring(string, linemax, delim):
     strings = string.split(' ')
@@ -139,8 +167,8 @@ def getHeader(hashdefines, prefix=''):
             ret += prefix+key+'\n'
     ret += '*/\n\n'
     for (key,val) in hashdefines:
-        val = wrapstring(str(val),100,' \\\n')
-        if '\n' in val:
+        if type(val) is str:
+            val = wrapstring(str(val),100,' \\\n')
             ret += '\n#define %s%s \\\n%s\n' % (prefix,key,val)
         else:
             ret += '#define %s%s %s\n' % (prefix,key,val)

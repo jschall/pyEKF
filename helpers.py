@@ -1,6 +1,7 @@
 from sympy import *
 import math
 import itertools
+import datetime
 
 def toVec(*args):
     ret = Matrix(map(lambda x: Matrix([x]), args)).vec()
@@ -28,7 +29,7 @@ def rot_vec_to_quat_approx(_v):
     v = toVec(_v)
     assert v.rows == 3
 
-    return toVec(1.,v*0.5)
+    return toVec(1,v*0.5)
 
 def quat_to_rot_vec_approx(_q):
     q = toVec(_q)
@@ -103,7 +104,7 @@ def zero_lower_offdiagonals(M):
     for r in range(ret.rows):
         for c in range(ret.cols):
             if r > c:
-                ret[r,c] = 0.
+                ret[r,c] = 0
     return ret
 
 def copy_upper_to_lower_offdiagonals(M):
@@ -139,8 +140,10 @@ def count_subexpression(subexpr, expr):
     else:
         return expr.count(subexpr)
 
-def extractSubexpressions(inexprs, prefix='X',threshold=10):
-    subexprs, outexprs = cse(inexprs)
+def extractSubexpressions(inexprs, prefix='X', threshold=0, prev_subx=[]):
+    subexprs, outexprs = cse(inexprs, symbols=numbered_symbols('__TMP__'), order='none')
+
+    subexprs = prev_subx+subexprs
 
     for i in reversed(range(len(subexprs))):
         ops_saved = (count_subexpression(subexprs[i][0], [[x[1] for x in subexprs], outexprs])-1)*subexprs[i][1].count_ops()
@@ -150,7 +153,7 @@ def extractSubexpressions(inexprs, prefix='X',threshold=10):
             outexprs = map(lambda x: x.xreplace(sub), outexprs)
 
     for i in range(len(subexprs)):
-        newSym = Symbol('%s[%u]' % (prefix,i))
+        newSym = Symbol('%s[%u]' % (prefix,i+len(prev_subx)))
         sub = {subexprs[i][0]:newSym}
         subexprs[i] = (newSym,subexprs[i][1])
         subexprs = map(lambda x: (x[0],x[1].xreplace(sub)), subexprs)
@@ -159,10 +162,6 @@ def extractSubexpressions(inexprs, prefix='X',threshold=10):
     outexprs = map(lambda x: Matrix(x) if type(x) is ImmutableDenseMatrix else x, outexprs)
 
     return tuple(outexprs+[subexprs])
-
-def pow_to_sq(string):
-    import re
-    return re.sub(r"pow\(([^,]+),\s*2\s*\)", 'sq(\g<1>)', string)
 
 def serialize_exprs_in_structure(obj):
     if isinstance(obj, dict):
@@ -184,7 +183,7 @@ def loadExprsFromJSON(fname):
     with open(fname, 'r') as f:
         import json
         imported = json.load(f)
-        imported['operations'] = deserialize_exprs_in_structure(imported['operations'])
+        imported['funcs'] = deserialize_exprs_in_structure(imported['funcs'])
         return imported
 
 def saveExprsToJSON(fname, input_dict):
@@ -192,11 +191,11 @@ def saveExprsToJSON(fname, input_dict):
         f.truncate()
         import json
         output_dict = input_dict.copy()
-        output_dict['operations'] = serialize_exprs_in_structure(output_dict['operations'])
+        output_dict['funcs'] = serialize_exprs_in_structure(output_dict['funcs'])
 
         json.dump(output_dict, f)
 
-def symmetricMatrixToVec(M):
+def upperTriangularToVec(M):
     assert M.rows == M.cols
 
     N = M.rows
