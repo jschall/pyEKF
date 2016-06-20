@@ -1,107 +1,95 @@
 from sympy import *
+from sympy.solvers import solve
 from helpers import *
 from sys import exit
-import math
+
+# EKF to estimate target position and velocity relative to vehicle
+
+# Goals:
+# - Provide target height estimation (i.e. depth-from-motion) for cases where
+#   there is no range finder or the target is on an elevated platform (like the
+#   roof of a car)
+# - Decouple precision landing performance from navigation performance and
+#   potentially allow precision landings indoors.
+# - Allow fusion of multiple sources of data relating to the target location
+#   (e.g. if your computer vision algorithm provides an estimate of distance to
+#   target based on its size in the frame)
 
 # Parameters
-dAngNoise = toVec(symbols('daxNoise dayNoise dazNoise'))
-dVelNoise = toVec(symbols('dvxNoise dvyNoise dvzNoise'))
-gravity = Symbol('gravity')
-gravityNED = toVec(0,0,gravity)
 dt = Symbol('dt')
-ptd = Symbol('ptd')
+Tbn = Matrix(3,3,symbols('Tbn[0:3][0:3]'))
+
+vehicleVelNED_R = toVec(symbols('vv_n_R vv_e_R vv_d_R'))
+targetCameraPos_R_sca = Symbol('cam_pos_R')
+terrainDistD_R_sca = Symbol('gnd_dist_d_R')
+targetDist_R_sca = Symbol("target_dist_R")
+initFocLen = Symbol("foc_len_init")
+initFocLen_R = Symbol("foc_len_init_R")
+
+terrainDistD_R = toVec(terrainDistD_R_sca)
+targetDist_R = toVec(targetDist_R_sca)
+targetCameraPos_R = toVec(targetCameraPos_R_sca, targetCameraPos_R_sca)
+
+vehicleDelVelNED_noise = toVec(symbols('vdv_n_noise vdv_e_noise vdv_d_noise'))
+
+# Observations
+terrainDistD = Symbol('gnd_dist_d')
+targetCameraPos = toVec(symbols('cam_pos_x cam_pos_y'))
+vehicleVelNED = toVec(symbols('vv_n vv_e vv_d'))
+targetDist = Symbol("target_dist")
 
 # Inputs
-dAngMeas = toVec(symbols('dax day daz'))
-dVelMeas = toVec(symbols('dvx dvy dvz'))
+vehicleDeltaVelocityNED = toVec(symbols('dvv_n dvv_e dvv_d'))
 
 # States
-estQuat = toVec(symbols('q0 q1 q2 q3'))
-rotErr = toVec(symbols('rex rey rez'))
-vn,ve,vd = symbols('vn ve vd')
-velNED = toVec(vn,ve,vd)
-posNED = toVec(symbols('pn pe pd'))
-dAngBias = toVec(symbols('dax_b day_b daz_b'))
-dAngScale = toVec(symbols('dax_s day_s daz_s'))
-dVelBias = toVec(0,0,symbols('dvz_b'))
-magBody = toVec(symbols('magx magy magz'))
-magNED = toVec(symbols('magn mage magd'))
-vwn, vwe = symbols('vwn vwe')
-windNED = toVec(vwn,vwe,0)
-stateVector = toVec(rotErr,velNED,posNED,dAngBias,dAngScale,dVelBias[2],magNED,magBody,vwn,vwe)
+targetPosNED = toVec(symbols('pt_n pt_e pt_d'))
+targetVelNED = toVec(symbols('vt_n vt_e vt_d'))
+focLen = Symbol('foc_len')
+#delVelBiasNE = toVec(symbols('dvv_n_b dvv_e_b'))
+stateVector = toVec(targetPosNED, targetVelNED, focLen)
 nStates = len(stateVector)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
 P = copy_upper_to_lower_offdiagonals(P)
 
-# Common computations
-# Quaternion from body frame at time k to earth frame
-truthQuat = quat_rotate_approx(estQuat,rotErr)
-# Rotation matrix from body frame at time k to earth frame
-Tbn = quat_to_matrix(truthQuat)
-
-def deriveCovariancePrediction(jsonfile):
-    print('Beginning covariance prediction derivation')
+def deriveInitialization(jsonfile):
+    print('Beginning initialization derivation')
     t1 = datetime.datetime.now()
 
-    # The prediction step predicts the state at time k+1 as a function of the
-    # state at time k and the control inputs. This attitude estimation EKF is
-    # formulated with the IMU data as control inputs rather than observations.
+    # Vector from rotation vector
+    vecToTargetBody = toVec(targetCameraPos[0], targetCameraPos[1], 1.)
+    vecToTargetNED = Tbn*vecToTargetBody
 
-    # Rotation vector from body frame at time k to body frame at time k+1
-    dAngTruth = dAngMeas.multiply_elementwise(dAngScale) - dAngBias
+    # Derive initial state and covariance from observations
+    initTargetPosNED = vecToTargetNED*terrainDistD/vecToTargetNED[2]
+    initTargetVelNED = -vehicleVelNED
 
-    # Change in velocity from time k to time k+1 in body frame at time k+1
-    dVelTruth = dVelMeas - dVelBias
+    # x_n: initial state
+    x_n = toVec(initTargetPosNED, initTargetVelNED, initFocLen)
 
-    truthQuatNew = quat_rotate_approx(truthQuat,dAngTruth)
-    errQuatNew = quat_multiply(quat_inverse(estQuat),truthQuatNew)
+    assert x_n.shape == stateVector.shape
 
-    # States at time k+1
-    #estQuatNew = quat_rotate_approx(estQuat, dAngTruth)
-    rotErrNew = quat_to_rot_vec_approx(errQuatNew)
-    velNEDNew = velNED+gravityNED*dt + Tbn*dVelTruth
-    posNEDNew = posNED+velNED*dt
-    dAngBiasNew = dAngBias
-    dAngScaleNew = dAngScale
-    dVelBiasNew = dVelBias
-    magBodyNew = magBody
-    magNEDNew = magNED
-    vwnNew = vwn
-    vweNew = vwe
+    # z: initialization measurement vector
+    z = toVec(terrainDistD, targetCameraPos, vehicleVelNED, initFocLen)
 
-    # f: state-transtition model
-    f = toVec(rotErrNew,velNEDNew,posNEDNew,dAngBiasNew,dAngScaleNew,dVelBiasNew[2],magNEDNew,magBodyNew,vwnNew,vweNew)
-    assert f.shape == stateVector.shape
+    # R: covariance of additive noise on z
+    R = diag(*toVec(terrainDistD_R, targetCameraPos_R, vehicleVelNED_R, initFocLen_R))
 
-    # F: linearized state-transition model
-    F = f.jacobian(stateVector)
+    # H: initialization measurement influence matrix
+    H = x_n.jacobian(z)
 
-    # u: control input vector
-    u = toVec(dAngMeas,dVelMeas)
+    # P_n: initial covariance
+    P_n = H*R*H.T
 
-    # G: control-influence matrix, AKA "B" in literature
-    G = f.jacobian(u)
-
-    # w_u_sigma: additive noise on u
-    w_u_sigma = toVec(dAngNoise, dVelNoise)
-
-    # Q_u: covariance of additive noise on u
-    Q_u = diag(*w_u_sigma.multiply_elementwise(w_u_sigma))
-
-    # Q: covariance of additive noise on x
-    Q = G*Q_u*G.T
-
-    # P_n: covariance matrix at time k+1
-    P_n = F*P*F.T + Q
+    assert P_n.shape == P.shape
 
     # Optimizations
     P_n = upperTriangularToVec(P_n)
-    P_n,subx = extractSubexpressions(P_n,'subx',threshold=10)
+    x_n,P_n,subx = extractSubexpressions([x_n,P_n],'subx',threshold=1)
 
     # Output generation
-    funcParams = {'quat':estQuat,'x':stateVector,'P':upperTriangularToVec(P),'u':u,'w_u_sigma':w_u_sigma,'gravity':gravity,'dt':dt}
+    funcParams = {'Tbn': Tbn, 'hgt': terrainDistD, 'hgt_R': terrainDistD_R, 'cam_pos': targetCameraPos, 'cam_pos_R': targetCameraPos_R_sca, 'init_foc_len': initFocLen, 'init_foc_len_R': initFocLen_R, 'vel': vehicleVelNED, 'vel_R': vehicleVelNED_R}
 
     funcs = {}
 
@@ -113,77 +101,114 @@ def deriveCovariancePrediction(jsonfile):
     funcParams = funcParams.copy()
     funcParams['subx'] = toVec([x[0] for x in subx])
 
+    funcs['state'] = {}
+    funcs['state']['params'] = funcParams
+    funcs['state']['ret'] = x_n
+
     funcs['cov'] = {}
     funcs['cov']['params'] = funcParams
     funcs['cov']['ret'] = P_n
 
     check_funcs(funcs)
 
-    saveExprsToJSON(jsonfile, {'funcs':funcs})
+    saveExprsToJSON(jsonfile, {'funcs':serialize_exprs_in_structure(funcs.copy())})
 
     op_count, subx_count = getOpStats(funcs)
     t2 = datetime.datetime.now()
-    print('%s Covariance predicton: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,jsonfile,op_count,subx_count))
+    print('%s initialization: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,jsonfile,op_count,subx_count))
 
-def derivePosNEFusion(jsonfile):
-    measPred = posNED[0:2,:]
+def derivePrediction(jsonfile):
+    print('Beginning prediction derivation')
+    t1 = datetime.datetime.now()
 
-    deriveFusionSimultaneous('posNE',jsonfile,measPred)
+    # States at time k+1
+    targetPosNEDNew = targetPosNED+targetVelNED*dt
+    targetVelNEDNew = targetVelNED-vehicleDeltaVelocityNED
+    focLenNew = focLen
 
-def derivePosDFusion(jsonfile):
-    measPred = posNED[2:3,:]
+    # f: state-transtition model
+    f = toVec(targetPosNEDNew, targetVelNEDNew, focLenNew)
+    assert f.shape == stateVector.shape
 
-    deriveFusionSimultaneous('posD',jsonfile,measPred)
+    # F: linearized state-transition model
+    F = f.jacobian(stateVector)
+
+    # u: control input vector
+    u = toVec(vehicleDeltaVelocityNED)
+
+    # G: control-influence matrix, AKA "B" in literature
+    G = f.jacobian(u)
+
+    # w_u_sigma: additive noise on u
+    w_u_sigma = toVec(vehicleDelVelNED_noise)
+
+    # Q_u: covariance of additive noise on u
+    Q_u = diag(*w_u_sigma.multiply_elementwise(w_u_sigma))
+
+    # Q: covariance of additive noise on x
+    Q = G*Q_u*G.T
+
+    # P_n: covariance matrix at time k+1
+    P_n = F*P*F.T + Q
+    assert P_n.shape == P.shape
+
+    x_n = f
+
+    # Optimizations
+    P_n = upperTriangularToVec(P_n)
+    x_n,P_n,subx = extractSubexpressions([x_n,P_n],'subx',threshold=10)
+
+    # Output generation
+    funcParams = {'x':stateVector,'P':upperTriangularToVec(P),'u':u,'w_u_sigma':w_u_sigma,'dt':dt}
+
+    funcs = {}
+
+    funcs['subx'] = {}
+    funcs['subx']['params'] = funcParams
+    funcs['subx']['ret'] = toVec([x[1] for x in subx])
+    funcs['subx']['retsymbols'] = toVec([x[0] for x in subx])
+
+    funcParams = funcParams.copy()
+    funcParams['subx'] = toVec([x[0] for x in subx])
+
+    funcs['state'] = {}
+    funcs['state']['params'] = funcParams
+    funcs['state']['ret'] = x_n
+
+    funcs['cov'] = {}
+    funcs['cov']['params'] = funcParams
+    funcs['cov']['ret'] = P_n
+
+    check_funcs(funcs)
+
+    saveExprsToJSON(jsonfile, {'funcs':serialize_exprs_in_structure(funcs.copy())})
+
+    op_count, subx_count = getOpStats(funcs)
+    t2 = datetime.datetime.now()
+    print('%s prediction: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,jsonfile,op_count,subx_count))
+
+def deriveCameraFusion(jsonfile):
+    targetPosBody = Tbn.T*targetPosNED
+    measPred = toVec(targetPosBody[0]/targetPosBody[2], targetPosBody[1]/targetPosBody[2])*focLen
+
+    deriveFusionSimultaneous('camera', jsonfile, measPred, additionalinputs={'Tbn':Tbn})
 
 def deriveVelNEFusion(jsonfile):
-    measPred = velNED[0:2,:]
+    measPred = -targetVelNED[0:2,0]
 
     deriveFusionSimultaneous('velNE',jsonfile,measPred)
 
 def deriveVelDFusion(jsonfile):
-    measPred = velNED[2:3,:]
+    measPred = -targetVelNED[2:3,0]
 
     deriveFusionSimultaneous('velD',jsonfile,measPred)
 
-def deriveAirspeedFusion(jsonfile):
-    measPred = toVec(sqrt((vn-vwn)**2 + (ve-vwe)**2 + vd**2))
+def deriveHeightFusion(jsonfile):
+    measPred = targetPosNED[2:3,0]
 
-    deriveFusionSimultaneous('airspeed',jsonfile,measPred)
+    deriveFusionSimultaneous('height',jsonfile,measPred)
 
-def deriveBetaFusion(jsonfile):
-    Vbw = Tbn.T*(velNED-windNED)
-    measPred = toVec(Vbw[1]/Vbw[0])
-
-    deriveFusionSimultaneous('beta',jsonfile,measPred,{'quat':estQuat})
-
-def deriveMagFusion(jsonfile):
-    measPred = Tbn.T*magNED+magBody
-
-    deriveFusionSimultaneous('mag',jsonfile,measPred,{'quat':estQuat})
-
-def deriveOptFlowFusion(jsonfile):
-    velBody = Tbn.T*velNED
-    rangeToGround = (ptd-posNED[2])/Tbn[2,2]
-    measPred = toVec(velBody[1]/rangeToGround, -velBody[0]/rangeToGround)
-
-    deriveFusionSimultaneous('flow',jsonfile,measPred,{'ptd':ptd,'quat':estQuat})
-
-def deriveYaw321Fusion(jsonfile):
-    measPred = toVec(atan(Tbn[1,0]/Tbn[0,0]))
-
-    deriveFusionSimultaneous('yaw321',jsonfile,measPred,{'quat':estQuat})
-
-def deriveYaw312Fusion(jsonfile):
-    measPred = toVec(atan(-Tbn[0,1]/Tbn[1,1]))
-
-    deriveFusionSimultaneous('yaw312',jsonfile,measPred,{'quat':estQuat})
-
-def deriveDeclinationFusion(jsonfile):
-    measPred = toVec(atan(magNED[1]/magNED[0]))
-
-    deriveFusionSimultaneous('declination',jsonfile,measPred)
-
-def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={},R_type='scalar'):
+def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={},subs={},R_type='scalar'):
     assert isinstance(measPred,MatrixBase) and measPred.cols == 1
     print('Beginning %s fusion derivation' % (fusionName,))
     t1 = datetime.datetime.now()
@@ -222,6 +247,13 @@ def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={},R_
     x_n = stateVector+K*y                # Updated state vector
     P_n = (I-K*H)*P*(I-K*H).T+K*R*K.T    # Updated covariance matrix
 
+    # Apply specified substitutions
+    y = y.xreplace(subs)
+    NIS = NIS.xreplace(subs)
+    x_n = x_n.xreplace(subs)
+    P_n = P_n.xreplace(subs)
+    temp_subx = [(x[0], x[1].xreplace(subs)) for x in temp_subx]
+
     # Optimizations
     P_n = upperTriangularToVec(P_n)
     y, NIS, x_n, P_n, subx = extractSubexpressions([y,NIS,x_n,P_n],'subx',threshold=10,prev_subx=temp_subx)
@@ -254,7 +286,8 @@ def deriveFusionSimultaneous(fusionName,jsonfile,measPred,additionalinputs={},R_
     funcs['cov']['params'] = funcParams
     funcs['cov']['ret'] = P_n
 
-    saveExprsToJSON(jsonfile, {'funcs':funcs})
+
+    saveExprsToJSON(jsonfile, {'funcs':serialize_exprs_in_structure(funcs.copy())})
 
     op_count, subx_count = getOpStats(funcs)
     t2 = datetime.datetime.now()

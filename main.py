@@ -1,6 +1,7 @@
 #!/usr/bin/python
 from derivations import *
-from codegen import *
+import ccodegen
+import pycodegen
 import os
 import sys
 import signal
@@ -29,33 +30,23 @@ outdir = args.outdir[0]
 if not os.path.exists(outdir):
     os.makedirs(outdir)
 
-predictionjson = os.path.join(outdir, 'covariancePrediction.json')
-posnejson = os.path.join(outdir, 'posNEFusion.json')
-posdjson = os.path.join(outdir, 'posDFusion.json')
-velnejson = os.path.join(outdir, 'velNEFusion.json')
-veldjson = os.path.join(outdir, 'velDFusion.json')
-airspeedjson = os.path.join(outdir, 'airspeedFusion.json')
-betajson = os.path.join(outdir, 'betaFusion.json')
-magjson = os.path.join(outdir, 'magFusion.json')
-yaw312json = os.path.join(outdir, 'yaw312Fusion.json')
-yaw321json = os.path.join(outdir, 'yaw321Fusion.json')
-flowjson = os.path.join(outdir, 'flowFusion.json')
-declinationjson = os.path.join(outdir, 'declinationFusion.json')
+initializationjson = os.path.join(outdir, 'initialization.json')
+predictionjson = os.path.join(outdir, 'prediction.json')
+camerajson = os.path.join(outdir, 'cameraFusion.json')
+velNEjson = os.path.join(outdir, 'velNEFusion.json')
+velDjson = os.path.join(outdir, 'velDFusion.json')
+heightjson = os.path.join(outdir, 'heightFusion.json')
+
 c_header = os.path.join(outdir, 'ekf_defines.h')
+pythonfile = os.path.join(outdir, 'ekf.py')
 
 derivations = {
-    'posne': (derivePosNEFusion, posnejson),
-    'posd': (derivePosDFusion, posdjson),
-    'velne': (deriveVelNEFusion, velnejson),
-    'veld': (deriveVelDFusion, veldjson),
-    'covpred': (deriveCovariancePrediction, predictionjson),
-    'airspeed': (deriveAirspeedFusion, airspeedjson),
-    'beta': (deriveBetaFusion, betajson),
-    'mag': (deriveMagFusion, magjson),
-    'yaw312': (deriveYaw312Fusion, yaw312json),
-    'yaw321': (deriveYaw321Fusion, yaw321json),
-    'flow': (deriveOptFlowFusion, flowjson),
-    'declination': (deriveDeclinationFusion, declinationjson)
+    'initialization': (deriveInitialization, initializationjson),
+    'prediction': (derivePrediction, predictionjson),
+    'camera': (deriveCameraFusion, camerajson),
+    'velNE': (deriveVelNEFusion, velNEjson),
+    'velD': (deriveVelDFusion, velDjson),
+    'height': (deriveHeightFusion, heightjson),
     }
 
 assert set(args.derive).issubset(set(derivations.keys()+['all']))
@@ -75,4 +66,5 @@ if args.codegen:
     for key, val in derivations.iteritems():
         jsondict[key] = val[1]
 
-    generateCode(jsondict,c_header)
+    ccodegen.generateCode(jsondict,c_header)
+    pycodegen.generateCode(jsondict,pythonfile)

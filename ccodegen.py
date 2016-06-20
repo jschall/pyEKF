@@ -47,11 +47,15 @@ class MyPrinter(CCodePrinter):
             return 'powf(%s, %s)' % (self._print(expr.base),
                                  self._print(expr.exp))
 
+    def _print_Rational(self, expr):
+        p, q = int(expr.p), int(expr.q)
+        return '%d.0/%d.0' % (p, q)
+
 def generateCode(jsondict, cfile):
     # extract filter operations
     filterOps = {}
     for n,fn in jsondict.iteritems():
-        filterOps[n.upper()] = loadExprsFromJSON(fn)['funcs']
+        filterOps[n.upper()] = deserialize_exprs_in_structure(loadExprsFromJSON(fn)['funcs'])
 
     hashdefines = []
     hashdefines.extend(getConstants(filterOps))
@@ -66,10 +70,11 @@ def generateCode(jsondict, cfile):
 def getConstants(filterOps):
     max_num_subx = 0
     for k,v in filterOps.iteritems():
-        max_num_subx = max(len(v['subx']['ret']),max_num_subx)
+        if 'subx' in v:
+            max_num_subx = max(len(v['subx']['ret']),max_num_subx)
 
-    x = filterOps['COVPRED']['cov']['params']['x']
-    u = filterOps['COVPRED']['cov']['params']['u']
+    x = filterOps['PREDICTION']['cov']['params']['x']
+    u = filterOps['PREDICTION']['cov']['params']['u']
     ret = []
     ret.append(('NUM_STATES', x.rows))
     ret.append(('NUM_CONTROL_INPUTS', u.rows))
@@ -118,7 +123,7 @@ def getSnippetDefines(opname, funcs):
 
         func['ret'] = func['ret'].xreplace(dict(substitutions))
 
-        defineName = '%s_CALC_%s(%s)' % (opname,retName.upper(),','.join(paramlist+[retParamName]))
+        defineName = '%s_CALC_%s(%s)' % (opname,retName.upper(),', '.join(paramlist+[retParamName]))
         ret.append((defineName,getSnippet(retParamName,func['ret'])))
 
     return ret
@@ -142,7 +147,7 @@ def getSnippet(retParamName, outputMatrix):
     for assignee,expr in zip(retMatrix,outputMatrix):
         ret += double2float(MyPrinter().doprint(expr, assignee))+' '
 
-    return str(ret)
+    return str(ret).replace('\n','')
 
 def double2float(string):
     import re

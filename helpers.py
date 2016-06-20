@@ -17,6 +17,10 @@ def skew(_v):
         [-v[1], v[0], 0]
     ])
 
+def vec_norm(_v):
+    v = toVec(_v)
+    return sqrt(sum([x**2 for x in v]))
+
 def rot_vec_to_quat(_v):
     v = toVec(_v)
     assert v.rows == 3
@@ -30,6 +34,19 @@ def rot_vec_to_quat_approx(_v):
     assert v.rows == 3
 
     return toVec(1,v*0.5)
+
+def quat_to_ef_yaw_matrix(_q):
+    q = toVec(_q)
+    assert q.rows == 4
+
+    sin_theta = 2*(q[0]*q[3] + q[1]*q[2])
+    cos_theta = 1-2*(q[2]**2+q[3]**2)
+
+    return Matrix([
+        [ cos_theta, -sin_theta,          0],
+        [ sin_theta,  cos_theta,          0],
+        [         0,          0,          1]
+    ])
 
 def quat_to_rot_vec_approx(_q):
     q = toVec(_q)
@@ -146,8 +163,9 @@ def extractSubexpressions(inexprs, prefix='X', threshold=0, prev_subx=[]):
     subexprs = prev_subx+subexprs
 
     for i in reversed(range(len(subexprs))):
+        from sympy.logic.boolalg import Boolean
         ops_saved = (count_subexpression(subexprs[i][0], [[x[1] for x in subexprs], outexprs])-1)*subexprs[i][1].count_ops()
-        if ops_saved < threshold:
+        if ops_saved < threshold or isinstance(subexprs[i][1], Boolean):
             sub = dict([subexprs.pop(i)])
             subexprs = map(lambda x: (x[0],x[1].xreplace(sub)), subexprs)
             outexprs = map(lambda x: x.xreplace(sub), outexprs)
@@ -182,18 +200,13 @@ def deserialize_exprs_in_structure(obj):
 def loadExprsFromJSON(fname):
     with open(fname, 'r') as f:
         import json
-        imported = json.load(f)
-        imported['funcs'] = deserialize_exprs_in_structure(imported['funcs'])
-        return imported
+        return json.load(f)
 
 def saveExprsToJSON(fname, input_dict):
     with open(fname, 'w') as f:
         f.truncate()
         import json
-        output_dict = input_dict.copy()
-        output_dict['funcs'] = serialize_exprs_in_structure(output_dict['funcs'])
-
-        json.dump(output_dict, f)
+        json.dump(input_dict, f)
 
 def upperTriangularToVec(M):
     assert M.rows == M.cols
