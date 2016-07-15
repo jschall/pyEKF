@@ -42,7 +42,7 @@ class MyPrinter(CCodePrinter):
         if expr.exp == 0.5:
             return 'sqrtf(%s)' % self._print(expr.base)
         elif expr.exp.is_integer and expr.exp <= 4:
-            return '*'.join([self._print(expr.base) for _ in range(expr.exp)])
+            return "(%s)" % ('*'.join(["(%s)" % (self._print(expr.base)) for _ in range(expr.exp)]),)
         else:
             return 'powf(%s, %s)' % (self._print(expr.base),
                                  self._print(expr.exp))
