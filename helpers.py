@@ -105,6 +105,37 @@ def rot_vec_to_matrix(_v):
     axis = v/theta
     return eye(3)*cos(theta)+(1-cos(theta))*axis*axis.T+skew(axis)*sin(theta)
 
+def Ry(theta):
+    return Matrix([[cos(theta), 0, sin(theta)],[0,1,0],[-sin(theta),0,cos(theta)]])
+
+def Rz(theta):
+    return Matrix([[cos(theta), -sin(theta), 0],[sin(theta),cos(theta),0],[0,0,1]])
+
+def polarInvToNED(posPolarInv):
+    posPolarInvSym = toVec(symbols('_pos_polar_inv[0:3]'))
+    return simplify(toVec(Rz(posPolarInvSym[0])*Ry(posPolarInvSym[1])*toVec(1.,0.,0.)/posPolarInvSym[2])).xreplace(dict(zip(posPolarInvSym, posPolarInv)))
+
+def NEDToPolarInv(posNED):
+    posNEDSym = toVec(symbols('_pos_ned[0:3]'))
+
+    return simplify(toVec(atan2(posNEDSym[1], posNEDSym[0]), atan2(-posNEDSym[2], vec_norm((posNEDSym[0],posNEDSym[1]))), 1/vec_norm(posNEDSym))).xreplace(dict(zip(posNEDSym, posNED)))
+
+def polarInvDerivToVelNED(velPolarInv, posPolarInv):
+    t = Symbol('_t')
+    velPolarInvSym = toVec(symbols('_vel_polar_inv[0:3]'))
+    posPolarInvSym = toVec(symbols('_pos_polar_inv[0:3]'))
+
+    return simplify(polarInvToNED(posPolarInvSym+velPolarInvSym*t).diff(t).subs(t,0)).xreplace(dict(zip(toVec(velPolarInvSym, posPolarInvSym), toVec(velPolarInv, posPolarInv))))
+
+def velNEDToPolarInvDeriv(velNED, posPolarInv):
+    t = Symbol('_t')
+
+    velNEDSym = toVec(symbols('_vel_ned[0:3]'))
+    posPolarInvSym = toVec(symbols('_pos_polar_inv[0:3]'))
+
+    return simplify(NEDToPolarInv(polarInvToNED(posPolarInvSym)+velNEDSym*t).diff(t).subs(t,0)).xreplace(dict(zip(toVec(velNEDSym, posPolarInvSym), toVec(velNED, posPolarInv))))
+
+
 def quickinv_sym(M):
     assert isinstance(M,MatrixBase) and M.rows == M.cols
     n = M.rows

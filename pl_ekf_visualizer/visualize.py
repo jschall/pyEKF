@@ -9,8 +9,6 @@ class PLEKF:
     def __init__(self,dt):
         self.ang_R = radians(1.)**2
         self.hgt_R = 4.**2
-        self.init_ang_sca = .98
-        self.init_ang_sca_R = 0.02**2
         self.vel_R = np.array([0.2**2,0.2**2,0.1**2])
         self.w_u_sigma = np.array([.25*dt,.25*dt,.25*dt])
 
@@ -18,11 +16,11 @@ class PLEKF:
         self.cov = np.zeros(EKF_NUM_STATES*(EKF_NUM_STATES+1)/2)
 
     def initialize(self,Tbn,cam,hgt,vel):
-        subx = EKF_INITIALIZATION_CALC_SUBX(Tbn, cam, self.ang_R, hgt, self.hgt_R, self.init_ang_sca, self.init_ang_sca_R, vel, self.vel_R)
-        state = EKF_INITIALIZATION_CALC_STATE(Tbn, cam, self.ang_R, hgt, self.hgt_R, self.init_ang_sca, self.init_ang_sca_R, subx, vel, self.vel_R)
-        cov = EKF_INITIALIZATION_CALC_COV(Tbn, cam, self.ang_R, hgt, self.hgt_R, self.init_ang_sca, self.init_ang_sca_R, subx, vel, self.vel_R)
+        subx = EKF_INITIALIZATION_CALC_SUBX(Tbn, cam, self.ang_R, hgt, self.hgt_R, vel, self.vel_R)
+        state = EKF_INITIALIZATION_CALC_STATE(Tbn, cam, self.ang_R, hgt, self.hgt_R, subx, vel, self.vel_R)
+        cov = EKF_INITIALIZATION_CALC_COV(Tbn, cam, self.ang_R, hgt, self.hgt_R, subx, vel, self.vel_R)
 
-        self.state = state
+        self.state = state.astype(np.float64)
         self.cov = cov
 
     def predict(self, dt, delVel):
@@ -57,7 +55,7 @@ class PLEKF:
         self.cov = cov
 
     def get_pos(self):
-        return np.array([self.state[EKF_STATE_IDX_PT_N],self.state[EKF_STATE_IDX_PT_E],self.state[EKF_STATE_IDX_PT_D]])
+        return EKF_POLAR2NED_CALC_NED([self.state[EKF_STATE_IDX_AZ],self.state[EKF_STATE_IDX_EL],self.state[EKF_STATE_IDX_RANGE_INV]])
 
     def get_vel(self):
         return np.array([self.state[EKF_STATE_IDX_VT_N],self.state[EKF_STATE_IDX_VT_E],self.state[EKF_STATE_IDX_VT_D]])
@@ -71,6 +69,7 @@ class PLEKF:
         r = lambda k: int(math.floor((2*N+1-math.sqrt((2*N+1)*(2*N+1)-8*k))/2))
         c = lambda k: int(k - N*r(k) + r(k)*(r(k)-1)/2 + r(k))
 
+
         for i in range(len(self.cov)):
             ret[r(i),c(i)] = ret[c(i),r(i)] = self.cov[i]
 
@@ -79,19 +78,19 @@ class PLEKF:
     def get_pos_cov(self):
         N = EKF_NUM_STATES
 
-        stateindices = [EKF_STATE_IDX_PT_N,EKF_STATE_IDX_PT_E,EKF_STATE_IDX_PT_D]
+        stateindices = [EKF_STATE_IDX_AZ,EKF_STATE_IDX_EL,EKF_STATE_IDX_RANGE_INV]
         ret = np.zeros((3,3))
         cov = self.get_cov()
         for r_in,r_out in zip(stateindices,range(3)):
             for c_in,c_out in zip(stateindices,range(3)):
                 ret[r_out,c_out] = cov[r_in,c_in]
+
         return ret
 
 class Copter:
     def __init__(self, ekf):
-        self._computeLambdas()
-        self.pos = np.array([[0.],[10.],[-10.]])
-        self.vel = np.array([[0.],[0.],[0.]])
+        self.pos = np.array([0.,10.,-10.])
+        self.vel = np.array([0.,0.,0.])
         self.height_dem = -10.
         self.t = 0.
         self.camera_meas_noise = math.radians(1.)
@@ -104,24 +103,10 @@ class Copter:
         self.do_accel_meas()
         self.do_vel_meas()
 
-    def _computeLambdas(self):
-        t_sym = sp.Symbol('t')
-        freq = 0.1
-        spd = 3.
-        copterPos = sp.Matrix([0.,spd*sp.cos(freq*2.*math.pi*t_sym)/(2.*math.pi*freq),-10.+0.5*t_sym])
-        #copterPos = sp.Matrix([0.,0.,-10.+0.5*t])
-
-        copterVel = sp.diff(copterPos,t_sym)
-        copterAccel = sp.diff(copterVel,t_sym)
-
-        self.copterPosLambda = lambdify(t_sym,copterPos)
-        self.copterVelLambda = lambdify(t_sym,copterVel)
-        self.copterAccelLambda = lambdify(t_sym,copterAccel)
-
     def update(self,dt):
         self.t += dt
-        self.vel += self.get_accel()*dt
-        self.pos += self.vel*dt
+        self.vel = self.vel + self.get_accel()*dt
+        self.pos = self.pos + self.vel*dt
 
     def do_accel_meas(self):
         self.accel_meas = self.get_accel()+np.array([[random.gauss(0.,self.accel_meas_noise)] for _ in range(3)])
@@ -131,7 +116,7 @@ class Copter:
 
     def do_camera_meas(self):
         relTargetPos = -self.get_pos()
-        self.camera_meas = np.matrix([relTargetPos[0]/relTargetPos[2], relTargetPos[1]/relTargetPos[2]])+np.array([[random.gauss(0.,self.camera_meas_noise)] for _ in range(2)])
+        self.camera_meas = np.matrix([[relTargetPos[0]/relTargetPos[2]], [relTargetPos[1]/relTargetPos[2]]])+np.array([[random.gauss(0.,self.camera_meas_noise)] for _ in range(2)])
 
     def get_camera_meas(self):
         return self.camera_meas
@@ -150,19 +135,16 @@ class Copter:
 
     def get_pos(self):
         return self.pos
-        #return self.copterPosLambda(self.t)
 
     def get_vel(self):
         return self.vel
-        #return self.copterVelLambda(self.t)
 
     def get_accel(self):
         kP = 1.
         kD = 2.
         estPos = self.ekf.get_pos()
         estVel = self.ekf.get_vel()
-        return np.array([estPos[0]*kP+estVel[0]*kD, estPos[1]*kP+estVel[1]*kD, 0.5-self.vel[2]])
-        #return self.copterAccelLambda(self.t)
+        return np.matrix([[estPos[0]*kP+estVel[0]*kD], [estPos[1]*kP+estVel[1]*kD], [0.5-self.vel[2]]])
 
 from helpers import tovpy
 import random
@@ -202,7 +184,7 @@ class EKFVis:
         noise_transform = np.linalg.cholesky(self.ekf.get_pos_cov())
 
         for i in range(len(self.cov_cloud)):
-            self.cov_cloud[i].pos = tovpy(noise_transform*self.cov_points[i]-self.ekf.get_pos())
+            self.cov_cloud[i].pos = tovpy(EKF_POLAR2NED_CALC_NED(np.asarray(noise_transform*self.cov_points[i]))-self.ekf.get_pos())
 
         vpy.rate(60)
 
@@ -218,6 +200,7 @@ ekf.initialize(np.eye(3),copter.get_camera_meas(), copter.get_height_meas()-5., 
 
 vis = EKFVis(ekf, copter)
 vis.update()
+#sleep(10)
 
 # fly 1 m/s for 10m
 while -copter.get_pos()[2] > 0.:
@@ -227,9 +210,9 @@ while -copter.get_pos()[2] > 0.:
         copter.do_accel_meas()
         ekf.predict(dt, (copter.get_accel_meas())*dt)
         copter.do_vel_meas()
-        ekf.fuseVertVel(copter.get_vel_meas()[2])
+        #ekf.fuseVertVel(copter.get_vel_meas()[2])
         vis.update()
     copter.do_height_meas()
-    ekf.fuseHeight(copter.get_height_meas())
+    #ekf.fuseHeight(copter.get_height_meas())
     copter.do_camera_meas()
     ekf.fuseCamera(np.eye(3), copter.get_camera_meas())

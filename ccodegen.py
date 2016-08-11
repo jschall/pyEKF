@@ -34,18 +34,25 @@ class MyPrinter(CCodePrinter):
             return self._print_Function(expr)
         PREC = precedence(expr)
 
+        invert_expr = False
+
         if expr.exp == -1:
             return '1.0/%s' % (self.parenthesize(expr.base, PREC))
         elif expr.exp < 0:
             expr = 1/expr
+            invert_expr = True
 
         if expr.exp == 0.5:
-            return 'sqrtf(%s)' % self._print(expr.base)
+            ret = 'sqrtf(%s)' % self._print(expr.base)
         elif expr.exp.is_integer and expr.exp <= 4:
-            return "(%s)" % ('*'.join(["(%s)" % (self._print(expr.base)) for _ in range(expr.exp)]),)
+            ret = "(%s)" % ('*'.join(["(%s)" % (self._print(expr.base)) for _ in range(expr.exp)]),)
         else:
-            return 'powf(%s, %s)' % (self._print(expr.base),
-                                 self._print(expr.exp))
+            ret = 'powf(%s, %s)' % (self._print(expr.base), self._print(expr.exp))
+
+        if invert_expr:
+            ret = '1.0/(%s)' % ret
+
+        return ret
 
     def _print_Rational(self, expr):
         p, q = int(expr.p), int(expr.q)
@@ -145,7 +152,8 @@ def getSnippet(retParamName, outputMatrix):
 
     ret = ''
     for assignee,expr in zip(retMatrix,outputMatrix):
-        ret += double2float(MyPrinter().doprint(expr, assignee))+' '
+        #ret += double2float(MyPrinter().doprint(expr, assignee))+' '
+        ret += ccode(expr, assign_to=assignee)+' '
 
     return str(ret).replace('\n','')
 

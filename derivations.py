@@ -42,39 +42,109 @@ targetDist = Symbol("target_dist")
 vehicleDeltaVelocityNED = toVec(symbols('dvv_n dvv_e dvv_d'))
 
 # States
-targetPosNED = toVec(symbols('pt_n pt_e pt_d'))
+# Parameterization: Target position is encoded as posNED = normalize(p_n, p_e, 1)/range_inv, and inverse range.
+targetPos = toVec(symbols('p_n p_e range_inv'))
 targetVelNED = toVec(symbols('vt_n vt_e vt_d'))
-focLen = Symbol('foc_len')
-#delVelBiasNE = toVec(symbols('dvv_n_b dvv_e_b'))
-stateVector = toVec(targetPosNED, targetVelNED, focLen)
+stateVector = toVec(targetPos, targetVelNED)
 nStates = len(stateVector)
 
 # Covariance matrix
 P = Matrix(nStates,nStates,symbols('P[0:%u][0:%u]' % (nStates,nStates)))
 P = copy_upper_to_lower_offdiagonals(P)
 
+# Common computations
+def posStateToPosNED(posState):
+    posStateSym = toVec(symbols('_pos_state[0:3]'))
+
+    ret = toVec(posStateSym[0], posStateSym[1], 1)
+    ret /= vec_norm(ret)*posStateSym[2]
+
+    return simplify(ret).xreplace(dict(zip(posStateSym, posState)))
+
+def posNEDToPosState(posNED):
+    posNEDSym = toVec(symbols('_pos_ned[0:3]'))
+    posStateSym = toVec(symbols('_pos_state[0:3]'))
+
+    posNEDEqn = posStateToPosNED(posStateSym)
+
+    return simplify(toVec(solve(posNEDEqn-posNEDSym, posStateSym)[0])).xreplace(dict(zip(posNEDSym, posNED)))
+
+def velNEDToPosStateDeriv(velNED, posState):
+    t = Symbol('_t')
+    velNEDSym = toVec(symbols('_vel_ned[0:3]'))
+    posStateSym = toVec(symbols('_pos_state[0:3]'))
+
+    return simplify(posNEDToPosState(posStateToPosNED(posStateSym)+velNEDSym*t).diff(t).subs(t,0)).xreplace(dict(zip(velNEDSym, velNED))).xreplace(dict(zip(posStateSym, posState)))
+
+def posStateDerivToVelNED(posStateDeriv, posState):
+    t = Symbol('_t')
+    posStateDerivSym = toVec(symbols('_pos_state_deriv[0:3]'))
+    posStateSym = toVec(symbols('_pos_state[0:3]'))
+
+    return simplify(posStateToPosNED(posStateSym+posStateDeriv*t).diff(t).subs(t,0)).xreplace(dict(zip(posStateDerivSym, posStateDeriv))).xreplace(dict(zip(posStateSym, posState)))
+
+targetPosNED = posStateToPosNED(targetPos)
+#targetVelNED = posStateDerivToVelNED(targetPosDeriv, targetPos)
+
+def deriveConversions(jsonfile):
+    print('Beginning conversions derivation')
+    t1 = datetime.datetime.now()
+
+    posNEDSym = toVec(symbols('_pos_ned[0:3]'))
+    posStateSym = toVec(symbols('_pos_state[0:3]'))
+
+    z = targetPos
+    x = posStateToPosNED(z)
+    R = P[0:3,0:3]
+    H = x.jacobian(z)
+    cov = H*R*H.T
+
+    funcs = {}
+
+    funcs['pos_ned'] = {}
+    funcs['pos_ned']['params'] = {'x': stateVector}
+    funcs['pos_ned']['ret'] = posStateToPosNED(targetPos)
+
+    funcs['pos_ned_var'] = {}
+    funcs['pos_ned_var']['params'] = {'x': stateVector, 'P':upperTriangularToVec(P)}
+    funcs['pos_ned_var']['ret'] = toVec([cov[i,i] for i in range(3)])
+
+
+    check_funcs(funcs)
+
+    saveExprsToJSON(jsonfile, {'funcs':serialize_exprs_in_structure(funcs.copy())})
+
+    op_count, subx_count = getOpStats(funcs)
+    t2 = datetime.datetime.now()
+    print('%s conversions: derivation saved to %s. %u ops, %u subexpressions.' % (t2-t1,jsonfile,op_count,subx_count))
+
 def deriveInitialization(jsonfile):
     print('Beginning initialization derivation')
     t1 = datetime.datetime.now()
 
+    depthInvInit, depthInvInitSigma = symbols('depth_inv_init depth_inv_init_sigma')
+
     # Vector from rotation vector
-    vecToTargetBody = toVec(targetCameraPos[0], targetCameraPos[1], 1.)
-    vecToTargetNED = Tbn*vecToTargetBody
+    unitvecToTargetBody = toVec(targetCameraPos[0], targetCameraPos[1], 1.)
+    unitvecToTargetBody /= vec_norm(unitvecToTargetBody)
+    unitvecToTargetNED = Tbn*unitvecToTargetBody
 
     # Derive initial state and covariance from observations
-    initTargetPosNED = vecToTargetNED*terrainDistD/vecToTargetNED[2]
+    initTargetPosNED = unitvecToTargetNED/depthInvInit
+    initTargetPos = posNEDToPosState(initTargetPosNED)
     initTargetVelNED = -vehicleVelNED
+    #initTargetPosDeriv = velNEDToPosStateDeriv(initTargetVelNED, initTargetPos)
 
     # x_n: initial state
-    x_n = toVec(initTargetPosNED, initTargetVelNED, initFocLen)
+    x_n = toVec(initTargetPos, initTargetVelNED)
 
     assert x_n.shape == stateVector.shape
 
     # z: initialization measurement vector
-    z = toVec(terrainDistD, targetCameraPos, vehicleVelNED, initFocLen)
+    z = toVec(depthInvInit, targetCameraPos, vehicleVelNED)
 
     # R: covariance of additive noise on z
-    R = diag(*toVec(terrainDistD_R, targetCameraPos_R, vehicleVelNED_R, initFocLen_R))
+    R = diag(*toVec(depthInvInitSigma**2, targetCameraPos_R, vehicleVelNED_R))
 
     # H: initialization measurement influence matrix
     H = x_n.jacobian(z)
@@ -84,12 +154,19 @@ def deriveInitialization(jsonfile):
 
     assert P_n.shape == P.shape
 
+    # Compute depth initialization
+    # This puts the 95% confidence interval between 0.2m and infinity
+    subs = solve((1/(depthInvInit+2*depthInvInitSigma)-0.2, depthInvInit-2*depthInvInitSigma), (depthInvInit, depthInvInitSigma))
+    pprint(subs)
+    x_n = x_n.xreplace(subs)
+    P_n = P_n.xreplace(subs)
+
     # Optimizations
     P_n = upperTriangularToVec(P_n)
-    x_n,P_n,subx = extractSubexpressions([x_n,P_n],'subx',threshold=1)
+    x_n,P_n,subx = extractSubexpressions([x_n,P_n],'subx',threshold=10)
 
     # Output generation
-    funcParams = {'Tbn': Tbn, 'hgt': terrainDistD, 'hgt_R': terrainDistD_R, 'cam_pos': targetCameraPos, 'cam_pos_R': targetCameraPos_R_sca, 'init_foc_len': initFocLen, 'init_foc_len_R': initFocLen_R, 'vel': vehicleVelNED, 'vel_R': vehicleVelNED_R}
+    funcParams = {'Tbn': Tbn, 'cam_pos': targetCameraPos, 'cam_pos_R': targetCameraPos_R_sca, 'vel': vehicleVelNED, 'vel_R': vehicleVelNED_R}
 
     funcs = {}
 
@@ -122,12 +199,15 @@ def derivePrediction(jsonfile):
     t1 = datetime.datetime.now()
 
     # States at time k+1
+    #targetPosDeriv = velNEDToPosStateDeriv(targetVelNED, targetPos)
     targetPosNEDNew = targetPosNED+targetVelNED*dt
+    targetPosNew = posNEDToPosState(targetPosNEDNew)
+    #targetPosNew = targetPos+targetPosDeriv*dt
     targetVelNEDNew = targetVelNED-vehicleDeltaVelocityNED
-    focLenNew = focLen
+    #targetPosDerivNew = velNEDToPosStateDeriv(targetVelNEDNew, targetPos)
 
     # f: state-transtition model
-    f = toVec(targetPosNEDNew, targetVelNEDNew, focLenNew)
+    f = simplify(toVec(targetPosNew, targetVelNEDNew))
     assert f.shape == stateVector.shape
 
     # F: linearized state-transition model
@@ -189,7 +269,7 @@ def derivePrediction(jsonfile):
 
 def deriveCameraFusion(jsonfile):
     targetPosBody = Tbn.T*targetPosNED
-    measPred = toVec(targetPosBody[0]/targetPosBody[2], targetPosBody[1]/targetPosBody[2])*focLen
+    measPred = toVec(targetPosBody[0]/targetPosBody[2], targetPosBody[1]/targetPosBody[2])
 
     deriveFusionSimultaneous('camera', jsonfile, measPred, additionalinputs={'Tbn':Tbn})
 

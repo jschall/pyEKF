@@ -14,7 +14,7 @@ def generateCode(jsondict, pyfile):
     for k in sorted(filterOps.keys()):
         functions.extend(getFunctions(k,filterOps[k]))
 
-    fileCont = 'from sympy import *\nimport numpy as np\nfrom math import *\n\n'
+    fileCont = 'import numpy as np\nfrom math import *\n\n'
     for name, val in constants:
         fileCont += 'EKF_%s = %s\n' % (name,val)
     fileCont += '\n'
@@ -92,7 +92,12 @@ def getFunctions(opname, funcs):
 
         funcText = 'def EKF_%s_CALC_%s(%s):\n' % (opname,retName.upper(),', '.join(paramlist))
 
-        funcText += '    '+retParamName+' = np.zeros((%u,%u))\n' % func['ret'].shape
+        if (nr,nc) == (1,1):
+            funcText += '    '+retParamName+' = 0\n'
+        elif nc == 1:
+            funcText += '    '+retParamName+' = np.zeros(%u)\n' % func['ret'].shape[0]
+        else:
+            funcText += '    '+retParamName+' = np.zeros((%u,%u))\n' % func['ret'].shape
 
         for assignee,expr in zip(retMatrix,func['ret']):
             funcText += '    '+str(assignee)+' = '+lambdarepr(expr)+'\n'
