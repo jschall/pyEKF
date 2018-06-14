@@ -15,8 +15,7 @@ for r in range(P_symmetric.rows):
 def deriveZeroRotErr(jsonfile):
     # This represents the rotation from q to q_n - we will substitute in the rotation error states later
     refIncrRot = Matrix(symbols('refIncr[0:3]'))
-    refIncrQuat = rot_vec_to_quat(refIncrRot)
-    T_qn_q = quat_to_matrix(refIncrQuat)
+    T_qn_q = rot_vec_to_matrix(refIncrRot)
 
     # f: state transtition model
     f = x[:,:]
@@ -35,8 +34,8 @@ def deriveZeroRotErr(jsonfile):
     # P_n: covariance matrix after step
     P_n = F*P*F.T
 
+    # Substitute rotErr for refIncrRot - this will cause rotErr to be reset to zero
     subs = dict(zip(refIncrRot, rotErr))
-
     q_n = q_n.subs(subs)
     x_n = x_n.subs(subs)
     P_n = P_n.subs(subs)
@@ -51,14 +50,6 @@ def derivePrediction(jsonfile):
     errQuat = rot_vec_to_quat_approx(rotErr)
     truthQuat = quat_multiply(q, errQuat)
     Tbn = quat_to_matrix(truthQuat)
-    deltaQuat = rot_vec_to_quat_approx(dAngMeas)
-    deltaQuatExact = rot_vec_to_quat(dAngMeas)
-    truthQuatNew = quat_multiply(truthQuat, deltaQuat)
-    truthQuatNewExact = quat_multiply(truthQuat, deltaQuatExact)
-    errQuatNew = quat_multiply(quat_inverse(q), truthQuatNew)
-    errQuatNewExact = quat_multiply(quat_inverse(q), truthQuatNewExact)
-    rotErrNew = quat_to_rot_vec_approx(errQuatNew)
-    rotErrNewExact = quat_to_rot_vec(errQuatNew)
     velNEDNew = velNED+gravityNED*dt+Tbn*dVelMeas
 
     # f: state transtition model
@@ -79,8 +70,6 @@ def derivePrediction(jsonfile):
     # x_n: state vector after prediction step
     x_n = f[:,:]
 
-    #x_n[0:3,0] = rotErrNewExact
-
     # P_n: covariance matrix after prediction step
     P_n = F*P*F.T + Q
 
@@ -90,7 +79,7 @@ def derivePrediction(jsonfile):
     # assume symmetry
     P_n = P_n.subs(zip(P, P_symmetric))
 
-    # rotErr is known to always be zero prior to this step
+    # rotErr is known to always be zero prior to this step, substutute zero for computational optimization
     subs = dict(zip(rotErr, zeros(3,1)))
     q_n = q_n.subs(subs)
     x_n = x_n.subs(subs)
@@ -128,7 +117,7 @@ def deriveUpdate(jsonfile):
     # q_n: reference quaternion after update step
     q_n = q
 
-    # rotErr is known to always be zero prior to this step
+    # rotErr is known to always be zero prior to this step, substutute zero for computational optimization
     subs = dict(zip(rotErr, zeros(3,1)))
     q_n = q_n.subs(subs)
     x_n = x_n.subs(subs)

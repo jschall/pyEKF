@@ -12,8 +12,8 @@ class Filter:
         self.gravity = 9.81
         self.w_u = toVec(.0003,.0003,.0003,.0025,.0025,.0025)
         self.q = toVec(1.,0.,0.,0.)
-        self.x = toVec(0.,0.,0.,0.,0.,0.)
-        self.P = diag(.1**2,.1**2,.1**2,.1**2,.1**2,.1**2)
+        self.x = toVec(0.1,0.,0.,0.,0.,0.)
+        self.P = diag(1.**2,1.**2,1.**2,.1**2,.1**2,.1**2)
         self.R_VEL = 0.5
 
         self.predict_x, self.predict_P, self.predict_q, self.predict_subexp = loadExprsFromJSON(predictjson, ('x_n', 'P_n', 'q_n', 'subexp'))
@@ -88,14 +88,15 @@ class Filter:
         #self.q = q
 
 f = Filter('minipredict.json', 'miniupdate.json', 'minizero.json')
-
+f.zeroRotErr()
 #from visual import *
 
 for i in range(1000):
-    imunoise = toVec(map(lambda x: gauss(0.,x),toVec(.003,.003,.003,.025,.025,.025)))
+    imunoise = toVec(map(lambda x: gauss(0.,x),toVec(.0003,.0003,.0003,.0025,.0025,.0025)))
+
     f.predict(0.01, toVec(0.0,0.0,0.3,0.0,0.0,-0.0981)+imunoise)
     f.zeroRotErr()
-    velnoise = toVec(gauss(0.,2),gauss(0.,2),gauss(0.,2))
+    velnoise = toVec(gauss(0.,0.5),gauss(0.,0.5),gauss(0.,2))
     f.update(velnoise)
     f.zeroRotErr()
     pprint(f.x)
