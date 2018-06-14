@@ -53,7 +53,7 @@ def derivePrediction(jsonfile):
     velNEDNew = velNED+gravityNED*dt+Tbn*dVelMeas
 
     # f: state transtition model
-    f = toVec(rotErr+dAngMeas, velNEDNew)
+    f = toVec(rotErr+dAngMeas-gyroBias*dt, velNEDNew, gyroBias)
 
     # F: linearized state-transition model
     F = f.jacobian(x)
@@ -64,14 +64,19 @@ def derivePrediction(jsonfile):
     # covariance of additive noise on control inputs (u)
     Q_u = diag(*w_u.multiply_elementwise(w_u))
 
+
     # covariance of additive noise on states (x)
     Q = G*Q_u*G.T
+
+    pnoise = zeros(nStates,1)
+    pnoise[6:9,0] = ones(3,1) * 0.01 * dt
+    Q_pnoise = diag(*pnoise.multiply_elementwise(pnoise))
 
     # x_n: state vector after prediction step
     x_n = f[:,:]
 
     # P_n: covariance matrix after prediction step
-    P_n = F*P*F.T + Q
+    P_n = F*P*F.T + Q + Q_pnoise
 
     # q_n: reference quaternion after prediction step
     q_n = q

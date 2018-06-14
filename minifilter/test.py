@@ -12,9 +12,9 @@ class Filter:
         self.gravity = 9.81
         self.w_u = toVec(.0003,.0003,.0003,.0025,.0025,.0025)
         self.q = toVec(1.,0.,0.,0.)
-        self.x = toVec(0.1,0.,0.,0.,0.,0.)
-        self.P = diag(1.**2,1.**2,1.**2,.1**2,.1**2,.1**2)
-        self.R_VEL = 0.5
+        self.x = toVec(0.1,0.,0.,0.,0.,0.,0.,0.,0.)
+        self.P = diag(1.**2,1.**2,1.**2,.1**2,.1**2,.1**2,.1**2,.1**2,.1**2)
+        self.R_VEL = 0.3
 
         self.predict_x, self.predict_P, self.predict_q, self.predict_subexp = loadExprsFromJSON(predictjson, ('x_n', 'P_n', 'q_n', 'subexp'))
         self.predict_subexp_symbols = [x[0] for x in self.predict_subexp]
@@ -91,15 +91,30 @@ f = Filter('minipredict.json', 'miniupdate.json', 'minizero.json')
 f.zeroRotErr()
 #from visual import *
 
+t = 0.0
+truthvel_ned = Matrix([-1.0,0.0,0.0])
+truthdelvel_ned = Matrix([0.0,0.0,-0.0981])
+truthdelang = Matrix([0.0,0.0,3.14])
+truthquat = Matrix([1.,0.,0.,0.])
 for i in range(1000):
+    truthdelvel_ned[0] = (2*pi*sin(2*pi*t)*0.01).evalf()
+    truthvel_ned[0] += truthdelvel_ned[0]
+
+    truthdelvel_body = (quat_to_matrix(truthquat).T*truthdelvel_ned).evalf()
+
     imunoise = toVec(map(lambda x: gauss(0.,x),toVec(.0003,.0003,.0003,.0025,.0025,.0025)))
 
-    f.predict(0.01, toVec(0.0,0.0,0.3,0.0,0.0,-0.0981)+imunoise)
+    print truthvel_ned[0], f.x[3]
+    f.predict(0.01, toVec(truthdelang,truthdelvel_body)+imunoise)
+    truthquat = quat_multiply(truthquat, rot_vec_to_quat(truthdelang))
     f.zeroRotErr()
-    velnoise = toVec(gauss(0.,0.5),gauss(0.,0.5),gauss(0.,2))
-    f.update(velnoise)
+    velnoise = toVec(gauss(0.,0.1),gauss(0.,0.1),gauss(0.,0.1))
+    f.update(truthvel_ned+velnoise)
     f.zeroRotErr()
-    pprint(f.x)
-    pprint(f.P)
-    pprint(f.q)
+    t += 0.01
+
+
+    #pprint(f.x)
+    #pprint(f.P)
+    #pprint(f.q)
     print "\n\n"
