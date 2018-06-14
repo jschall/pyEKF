@@ -12,18 +12,57 @@ for r in range(P_symmetric.rows):
         if r > c:
             P_symmetric[c,r] = P_symmetric[r,c]
 
+def deriveZeroRotErr(jsonfile):
+    # This represents the rotation from q to q_n - we will substitute in the rotation error states later
+    refIncrRot = Matrix(symbols('refIncr[0:3]'))
+    refIncrQuat = rot_vec_to_quat(refIncrRot)
+    T_qn_q = quat_to_matrix(refIncrQuat)
+
+    # f: state transtition model
+    f = x[:,:]
+    f[0:3,0] = T_qn_q.T * rotErr
+
+    # F: linearized state-transition model
+    F = f.jacobian(x)
+
+    # q_n: reference quaternion after step
+    q_n = quat_normalize(quat_multiply(q, rot_vec_to_quat(refIncrRot)))
+
+    # x_n: state matrix after step
+    x_n = x[:,:]
+    x_n[0:3,0] -= refIncrRot
+
+    # P_n: covariance matrix after step
+    P_n = F*P*F.T
+
+    subs = dict(zip(refIncrRot, rotErr))
+
+    q_n = q_n.subs(subs)
+    x_n = x_n.subs(subs)
+    P_n = P_n.subs(subs)
+
+    x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
+
+
+    saveExprsToJSON(jsonfile, {'x_n': x_n, 'P_n':P_n, 'q_n': q_n, 'subexp':subexp})
+
+
 def derivePrediction(jsonfile):
     errQuat = rot_vec_to_quat_approx(rotErr)
     truthQuat = quat_multiply(q, errQuat)
     Tbn = quat_to_matrix(truthQuat)
     deltaQuat = rot_vec_to_quat_approx(dAngMeas)
+    deltaQuatExact = rot_vec_to_quat(dAngMeas)
     truthQuatNew = quat_multiply(truthQuat, deltaQuat)
+    truthQuatNewExact = quat_multiply(truthQuat, deltaQuatExact)
     errQuatNew = quat_multiply(quat_inverse(q), truthQuatNew)
+    errQuatNewExact = quat_multiply(quat_inverse(q), truthQuatNewExact)
     rotErrNew = quat_to_rot_vec_approx(errQuatNew)
+    rotErrNewExact = quat_to_rot_vec(errQuatNew)
     velNEDNew = velNED+gravityNED*dt+Tbn*dVelMeas
 
     # f: state transtition model
-    f = toVec(rotErrNew, velNEDNew)
+    f = toVec(rotErr+dAngMeas, velNEDNew)
 
     # F: linearized state-transition model
     F = f.jacobian(x)
@@ -38,18 +77,24 @@ def derivePrediction(jsonfile):
     Q = G*Q_u*G.T
 
     # x_n: state vector after prediction step
-    x_n = f
+    x_n = f[:,:]
+
+    #x_n[0:3,0] = rotErrNewExact
 
     # P_n: covariance matrix after prediction step
     P_n = F*P*F.T + Q
 
     # q_n: reference quaternion after prediction step
-    #q_n = q
-    q_n = quat_normalize(quat_multiply(q, rot_vec_to_quat(x_n[0:3,0])))
-    x_n[0:3,0] = (0.,0.,0.)
+    q_n = q
 
     # assume symmetry
     P_n = P_n.subs(zip(P, P_symmetric))
+
+    # rotErr is known to always be zero prior to this step
+    subs = dict(zip(rotErr, zeros(3,1)))
+    q_n = q_n.subs(subs)
+    x_n = x_n.subs(subs)
+    P_n = P_n.subs(subs)
 
     x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
 
@@ -83,12 +128,20 @@ def deriveUpdate(jsonfile):
     # q_n: reference quaternion after update step
     q_n = q
 
+    # rotErr is known to always be zero prior to this step
+    subs = dict(zip(rotErr, zeros(3,1)))
+    q_n = q_n.subs(subs)
+    x_n = x_n.subs(subs)
+    P_n = P_n.subs(subs)
+
     x_n, P_n, q_n, subexp = extractSubexpressions([x_n,P_n,q_n],'subexp')
 
     saveExprsToJSON(jsonfile, {'x_n': x_n, 'P_n':P_n, 'q_n': q_n, 'subexp':subexp})
 
+zerojson = 'minizero.json'
 predictjson = 'minipredict.json'
 updatejson = 'miniupdate.json'
 
 derivePrediction(predictjson)
 deriveUpdate(updatejson)
+deriveZeroRotErr(zerojson)
